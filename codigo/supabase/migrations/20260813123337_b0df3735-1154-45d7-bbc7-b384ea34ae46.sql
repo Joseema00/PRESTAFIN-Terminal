@@ -1,0 +1,1 @@
+ALTER TABLE public.wealth_profile ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;

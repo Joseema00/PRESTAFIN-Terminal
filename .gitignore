@@ -1,0 +1,23 @@
+# Dependencias y cachés que se regeneran desde package-lock.json.
+node_modules/
+*.log
+**/.test-tmp/
+codigo/qa/package-stage/
+codigo/qa/profile/
+codigo/qa/results/
+
+# Credenciales y datos personales; no forman parte del producto.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+workspace.json
+workspace.json.*
+market-cache/
+
+# Temporales del empaquetado y del sistema.
+*.asar.next
+Thumbs.db
+.DS_Store

@@ -1,0 +1,9 @@
+PRESTAFIN TERMINAL 0.7.0
+
+Abre Prestafin Terminal.exe desde esta carpeta, conservando todos los archivos.
+No es necesario extraer ningún ZIP.
+
+Novedades: 15 carteras modelo de fondos, reparto RV/RF vinculado a la entrevista, fichas de fondos, gráficos y rentabilidades con fechas y fuentes.
+Ver GUIA-FONDOS.md para cobertura, pruebas y límites de la actualización.
+
+Código y futuras actualizaciones: C:\Users\jmloe\Documents\ChatGPT\PRESTAFIN\codigo

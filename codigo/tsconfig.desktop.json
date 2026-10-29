@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["desktop-ui/**/*.ts", "desktop-ui/**/*.tsx", "vite.desktop.config.ts"],
+  "compilerOptions": {
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/hooks/use-portfolios": ["./desktop-ui/use-portfolios.ts"],
+      "@/hooks/use-auth": ["./desktop-ui/use-auth.ts"],
+      "@/hooks/use-subscription": ["./desktop-ui/use-subscription.ts"],
+      "@/hooks/use-market-data": ["./desktop-ui/use-market-data.ts"],
+      "@/components/app/paywall": ["./desktop-ui/paywall.tsx"],
+      "@/lib/analytics/gtag": ["./desktop-ui/analytics.ts"],
+      "@/*": ["./src/*"]
+    }
+  }
+}
