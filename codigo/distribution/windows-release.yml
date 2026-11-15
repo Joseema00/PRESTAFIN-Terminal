@@ -57,6 +57,7 @@ jobs:
         working-directory: source/codigo
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force qa | Out-Null
           $smokeProcess = Start-Process -FilePath (Resolve-Path node_modules/electron/dist/electron.exe).Path -ArgumentList @('scripts/smoke-installed.cjs') -WindowStyle Hidden -PassThru -Wait -RedirectStandardOutput qa/native-smoke.log -RedirectStandardError qa/native-smoke-error.log
           if ($smokeProcess.ExitCode -ne 0) { Get-Content qa/native-smoke-error.log; exit $smokeProcess.ExitCode }
       - name: Publish only after all checks pass

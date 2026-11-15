@@ -3,6 +3,7 @@ const {app}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),assert=require('node:assert/strict');
 const {pathToFileURL}=require('node:url'),{createHash}=require('node:crypto');
 const root=path.resolve(__dirname,'..'),archive=path.resolve(process.env.PRESTAFIN_SMOKE_ARCHIVE||path.join(root,'release','win-unpacked','resources','app.asar'));
+fs.mkdirSync(path.join(root,'qa'),{recursive:true});
 const profile=fs.mkdtempSync(path.join(root,'qa','installed-smoke-profile-')),out=path.join(root,'qa','installed-smoke');
 fs.mkdirSync(profile,{recursive:true});fs.mkdirSync(out,{recursive:true});app.setPath('userData',profile);
 // Read the archive itself with ASAR interception disabled, then restore Electron's
