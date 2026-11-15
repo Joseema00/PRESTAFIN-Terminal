@@ -3,6 +3,7 @@
  * de referencia, drawdowns, años naturales, exposición por divisa y costes.
  * Todo se calcula sobre las series históricas reales cuando están disponibles.
  */
+import {optimizeContinuous} from './optimization';
 import type { Asset } from "./assets";
 import type { PortfolioHistory } from "./market/backtest";
 import { RISK_FREE } from "./portfolio";
@@ -11,33 +12,12 @@ import { RISK_FREE } from "./portfolio";
 
 /**
  * Pesos que igualan la contribución al riesgo de cada activo.
- * Algoritmo iterativo multiplicativo sobre la matriz de covarianzas real.
+ * Descenso cíclico de coordenadas sobre la covarianza suministrada.
+ * Rechaza límites incompatibles con la contribución igual al riesgo.
  */
 export function riskParityWeights(cov: number[][], maxWeight = 1): number[] {
-  const n = cov.length;
-  if (n === 0) return [];
-  if (n === 1) return [1];
-  let w = new Array(n).fill(1 / n);
-  for (let iter = 0; iter < 500; iter++) {
-    const mrc = w.map((_, i) => w.reduce((s, wj, j) => s + wj * (cov[i]?.[j] ?? 0), 0));
-    const port = Math.max(1e-12, w.reduce((s, wi, i) => s + wi * (mrc[i] ?? 0), 0));
-    const target = port / n;
-    const next = w.map((wi, i) => {
-      const ctr = Math.max(1e-12, wi * (mrc[i] ?? 0));
-      return Math.max(1e-8, wi * (target / ctr) ** 0.5);
-    });
-    const sum = next.reduce((a, b) => a + b, 0) || 1;
-    w = next.map((v) => v / sum);
-  }
-  if (maxWeight < 1) {
-    for (let k = 0; k < 60; k++) {
-      w = w.map((v) => Math.min(maxWeight, v));
-      const s = w.reduce((a, b) => a + b, 0) || 1;
-      if (Math.abs(s - 1) < 1e-6) break;
-      w = w.map((v) => v / s);
-    }
-  }
-  return w;
+  const n=cov.length;if(n===0)return [];
+  return optimizeContinuous({ids:Array.from({length:n},(_,i)=>String(i)),names:Array.from({length:n},(_,i)=>'Activo '+(i+1)),means:Array(n).fill(0),cov:cov.map(row=>row.map(v=>v*10000)),currentWeights:Array(n).fill(1/n),riskFree:0,method:'riskParity',maxWeights:Array(n).fill(maxWeight),source:'Covarianza suministrada al análisis',basis:'assumptions'},2).point.weights;
 }
 
 /* ---------------- Comparación contra índice de referencia ---------------- */

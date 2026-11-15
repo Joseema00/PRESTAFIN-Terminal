@@ -5,7 +5,7 @@ import { tailRisk,covariance,riskContributions,analyseHistory,costProjection,bon
 import { changeInterviewAnswer,reviewInterview,isInterviewReviewed,validateInterviews } from '../../desktop-runtime/risk-profile.mjs';
 import { validateWorkspace } from '../workspace.mjs';
 import { emptyWorkspace,newPerson } from '../../desktop-runtime/people.mjs';
-import { DEFAULT_REPORT,DEFAULT_ADVISER } from '../../desktop-runtime/adviser.mjs';
+import { DEFAULT_REPORT,DEFAULT_ADVISER,validateReportPreferences } from '../../desktop-runtime/adviser.mjs';
 const close=(a,b,t=1e-9)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
 function history(count=100){return {portfolioId:'p',source:'Synthetic test data, EUR total returns',importedAt:Date.UTC(2026,9,18),currency:'EUR',columns:['a','b'],rows:Array.from({length:count},(_,i)=>({month:new Date(Date.UTC(2010,i,1)).toISOString().slice(0,7),returns:[.02*Math.sin(i),.01*Math.cos(i)]}))};}
 test('Spanish monetary entry preserves cents and rejects partial or malformed values',()=>{
@@ -60,4 +60,11 @@ test('review requires complete answers and changing answers makes an existing re
   const recorded={...i,review:{revision:0,reviewedAt:2,adviser:'Test',notes:'A documented test review',nextReviewDate:'2099-01-01'}};
   assert.equal(isInterviewReviewed(recorded),true);const changed=changeInterviewAnswer(recorded,'income',1000,3);assert.equal(isInterviewReviewed(changed),false);assert.deepEqual(validateInterviews([changed])[0].review,recorded.review);
   assert.throws(()=>validateInterviews([{...changed,review:{...recorded.review,revision:2}}]));
+});
+
+test('report presentation migrates old preferences and validates chart and section customization',()=>{
+ const old={...DEFAULT_REPORT};for(const key of ['title','subtitle','purpose','sectionNotes','charts','chartTheme','includeCover','includeContents','includeTables'])delete old[key];
+ const migrated=validateReportPreferences(old);assert.equal(migrated.includeCover,true);assert.ok(migrated.charts.includes('balance'));assert.equal(migrated.level,old.level);
+ const custom=validateReportPreferences({...DEFAULT_REPORT,sections:['risk','summary'],charts:['balance','balance'],sectionNotes:{summary:'Personalizado'},chartTheme:'mono'});assert.deepEqual(custom.charts,['balance']);assert.deepEqual(custom.sections,['risk','summary']);
+ for(const patch of [{charts:['fake']},{chartTheme:'red'},{includeCover:'yes'},{sectionNotes:{fake:'text'}},{sectionNotes:{summary:1}},{title:'x'.repeat(161)}])assert.throws(()=>validateReportPreferences({...DEFAULT_REPORT,...patch}));
 });

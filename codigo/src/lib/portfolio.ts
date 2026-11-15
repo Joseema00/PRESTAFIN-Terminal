@@ -2,6 +2,7 @@ import type { PortfolioTracking } from './portfolio-monitor';
 import type { AllocationAudit } from './allocation-engine';
 import type { PortfolioProposal } from './portfolio-proposal';
 import { assetById, correlation, type Asset, type AssetClass } from "./assets";
+import {optimizeContinuous} from './optimization';
 
 export type HoldingMeta = {
   /** Símbolo real en el proveedor de datos (Yahoo Finance). */
@@ -13,7 +14,7 @@ export type HoldingMeta = {
   cls?: AssetClass;
 };
 
-export type Holding = { assetId: string; amount: number; meta?: HoldingMeta };
+export type Holding = { assetId: string; amount: number; meta?: HoldingMeta; /** Bloque de planificación elegido por el usuario. */ planningRole?: import('./investment-products').ProductRole };
 
 /** Traduce el tipo del proveedor a la clase de activo interna. */
 export function classForKind(kind: string): AssetClass {
@@ -54,6 +55,8 @@ export type Portfolio = {
   mode?: 'draft';
   tracking?: PortfolioTracking;
   mandate?: AllocationAudit;
+  modelStudy?:{id:string;name:string;reasons:string[]};
+  optimizationStudy?: import('./optimization').OptimizationStudy;
 };
 
 export type PortfolioStats = {
@@ -134,21 +137,14 @@ function mulberry(seed: number) {
   };
 }
 
-function normalize(w: number[]) {
-  const s = w.reduce((a, b) => a + b, 0) || 1;
-  return w.map((v) => v / s);
-}
-
 /** Proyecta pesos respetando límites mínimo/máximo por activo. */
 export function clampWeights(w: number[], min: number, max: number) {
-  let out = normalize(w.map((v) => Math.max(0, v)));
-  for (let k = 0; k < 60; k++) {
-    out = out.map((v) => Math.min(max, Math.max(min, v)));
-    const s = out.reduce((a, b) => a + b, 0) || 1;
-    if (Math.abs(s - 1) < 1e-6) break;
-    out = out.map((v) => v / s);
-  }
-  return normalize(out);
+  if(!w.length||w.some(v=>!Number.isFinite(v))||!Number.isFinite(min)||!Number.isFinite(max)||min<0||max>1||min>max||w.length*min>1+1e-12||w.length*max<1-1e-12)throw new Error('Los límites de pesos son incompatibles con una cartera del 100 %.');
+  // Euclidean projection onto the bounded simplex; no final renormalization
+  // that would undo the investor's explicitly selected limits.
+  let lo=Math.min(...w)-max,hi=Math.max(...w)-min;
+  for(let k=0;k<100;k++){const shift=(lo+hi)/2,s=w.reduce((s,v)=>s+Math.min(max,Math.max(min,v-shift)),0);if(s>1)lo=shift;else hi=shift;}
+  return w.map(v=>Math.min(max,Math.max(min,v-(lo+hi)/2)));
 }
 
 function randomWeights(n: number, rnd: () => number, min = 0, max = 1) {
@@ -182,66 +178,29 @@ export function optimize(
   if (assets.length === 0) return null;
   const opts: OptimizeOptions = typeof options === "number" ? { samples: options } : options;
   const samples = opts.samples ?? 4000;
-  const maxW = Math.max(1 / assets.length, Math.min(1, opts.maxWeight ?? 1));
-  const minW = Math.max(0, Math.min(opts.minWeight ?? 0, 1 / assets.length));
+  const maxW = opts.maxWeight ?? 1;
+  const minW = opts.minWeight ?? 0;
+  clampWeights(currentWeights,minW,maxW);
+  if(!Number.isInteger(samples)||samples<1||samples>100000)throw new Error('Número de muestras no válido.');
   const cov = opts.cov ?? covMatrix(assets);
   const point = (w: number[]): FrontierPoint => {
     const s = statsFor(assets, w, cov);
     return { vol: s.vol, er: s.er, sharpe: s.sharpe, weights: w };
   };
   const current = point(currentWeights);
-  if (assets.length === 1) {
-    return { cloud: [current], frontier: [current], maxSharpe: current, minVol: current, current };
-  }
+  const input={ids:assets.map(a=>a.id),names:assets.map(a=>a.name),means:assets.map(a=>a.er),cov:cov.map(row=>row.map(v=>v*10000)),currentWeights,riskFree:RISK_FREE,minWeights:assets.map(()=>minW),maxWeights:assets.map(()=>maxW),source:opts.cov?'Matriz suministrada al optimizador':'Hipótesis del catálogo por clase',basis:'assumptions' as const};
+  const preciseMinimum=optimizeContinuous({...input,method:'minVariance'});
+  if(Math.max(...input.means)<=RISK_FREE||cov.every(row=>row.every(v=>v===0)))return null;
+  const preciseSharpe=optimizeContinuous({...input,method:'maxSharpe'});
+  if (assets.length === 1) return {cloud:[current],frontier:[point(preciseMinimum.point.weights)],maxSharpe:point(preciseSharpe.point.weights),minVol:point(preciseMinimum.point.weights),current};
 
   const rnd = mulberry(20260805);
   const cloud: FrontierPoint[] = [];
   for (let k = 0; k < samples; k++) cloud.push(point(randomWeights(assets.length, rnd, minW, maxW)));
 
-  // refinamiento local sobre los mejores candidatos
-  const refine = (start: FrontierPoint, score: (p: FrontierPoint) => number) => {
-    let best = start;
-    let step = 0.25;
-    for (let iter = 0; iter < 400; iter++) {
-      const w = best.weights.slice();
-      const i = Math.floor(rnd() * w.length);
-      const j = Math.floor(rnd() * w.length);
-      if (i === j) continue;
-      const move = Math.min(w[i] ?? 0, step * rnd());
-      w[i] = (w[i] ?? 0) - move;
-      w[j] = (w[j] ?? 0) + move;
-      const cand = point(clampWeights(w, minW, maxW));
-      if (score(cand) > score(best)) best = cand;
-      if (iter % 100 === 99) step *= 0.5;
-    }
-    return best;
-  };
-
-  const maxSharpe = refine(
-    cloud.reduce((a, b) => (b.sharpe > a.sharpe ? b : a)),
-    (p) => p.sharpe,
-  );
-  const minVol = refine(
-    cloud.reduce((a, b) => (b.vol < a.vol ? b : a)),
-    (p) => -p.vol,
-  );
-
-  // frontera eficiente: máximo retorno por bucket de volatilidad
-  const all = [...cloud, maxSharpe, minVol];
-  const lo = Math.min(...all.map((p) => p.vol));
-  const hi = Math.max(...all.map((p) => p.vol));
-  const buckets = new Map<number, FrontierPoint>();
-  const N = 40;
-  for (const p of all) {
-    const b = hi === lo ? 0 : Math.round(((p.vol - lo) / (hi - lo)) * N);
-    const prev = buckets.get(b);
-    if (!prev || p.er > prev.er) buckets.set(b, p);
-  }
-  const frontier = [...buckets.values()]
-    .sort((a, b) => a.vol - b.vol)
-    .filter((p, i, arr) => i === 0 || p.er >= (arr[i - 1]?.er ?? 0));
-
-  return { cloud, frontier, maxSharpe, minVol, current };
+  // Keep the simulated cloud for visual exploration. Actual selected solutions
+  // and the frontier now come from constrained continuous optimization.
+  return {cloud,frontier:preciseMinimum.frontier.map(p=>point(p.weights)),maxSharpe:point(preciseSharpe.point.weights),minVol:point(preciseMinimum.point.weights),current};
 }
 
 /* ---------------- Monte Carlo ---------------- */

@@ -23,7 +23,7 @@ async function loadSeries(symbol,frequency,force) {
   let cached;
   try {
     const data = JSON.parse(await readFile(filename,'utf8'));
-    if (data?.instrument?.symbol && Array.isArray(data.points) && data.meta?.fetchedAt) cached = data;
+    if (data?.instrument?.symbol === symbol && Array.isArray(data.points) && data.meta?.fetchedAt && (!/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(symbol) || data.instrument.isin===symbol && data.instrument.currency===data.meta.currency)) cached = data;
   } catch {}
   if (!force && cached && Date.now() - Date.parse(cached.meta.fetchedAt) < 6*60*60*1000) return {ok:true,series:cached};
   const response = await fetchHistoryChain(symbol,frequency);
@@ -32,7 +32,7 @@ async function loadSeries(symbol,frequency,force) {
     return {ok:false,symbol,error:response.error};
   }
   const raw = response.series;
-  const series = {...raw,meta:{provider:response.provider,providerLabel:response.provider==='vanguard'?'Vanguard · valor liquidativo':'Yahoo Finance',currency:raw.currency,frequency:raw.frequency,
+  const series = {...raw,meta:{provider:response.provider,providerLabel:response.provider==='vanguard'?'Vanguard · valor liquidativo':response.provider==='ft-funds'?'Financial Times · valor liquidativo':'Yahoo Finance',currency:raw.currency,frequency:raw.frequency,
     firstDate:raw.points[0]?.d ?? null,lastDate:raw.points.at(-1)?.d ?? null,pointCount:raw.points.length,
     fetchedAt:new Date().toISOString(),adjusted:raw.adjusted,quality:'real'}};
   try {

@@ -4,13 +4,13 @@ import { compareProducts,productById,RESEARCH_DATE,validateProposalSettings,ROLE
 import type { PortfolioProposal,ProposalPosition } from './portfolio-proposal';
 import type { Holding } from './portfolio';
 export const PENDING_CASH_ID='interview-cash-pending';
-export const INTERVIEW_PLAN_VERSION=4;
+export const INTERVIEW_PLAN_VERSION=10;
 export const ROLE_SHOCK:Record<ProductRole,number>={overnight:1,ultrashort:3,short:7,aggregate:15,equity:50};
 export type InterviewPlan={kind:'incomplete'|'investment'|'objective'|'planning';canCreate:boolean;title:string;description:string;holdings:Holding[];amount:number;available:number;required:string[];issues:Issue[];proposal?:PortfolioProposal;comparisons:ProductComparison[]};
 const round=(n:number)=>Math.round(n*100)/100;
 const distribute=(total:number,weights:number[])=>{const cents=Math.round(total*100),parts=weights.map(w=>Math.floor(cents*w/100));const left=cents-parts.reduce((s,n)=>s+n,0);const order=weights.map((w,i)=>({i,remainder:cents*w/100-parts[i]!})).sort((a,b)=>b.remainder-a.remainder||a.i-b.i);for(let i=0;i<left;i++){const index=order[i%order.length]!.i;parts[index]=parts[index]!+1;}return parts.map(n=>n/100);};
 /** Model policy, deliberately separate from knowledge checks and actual funding. Explicit model assumptions are saved separately from observed market data. */
-export function buildInterviewPlan(raw:Answers,settings?:ProposalSettings):InterviewPlan{
+export function buildInterviewPlan(raw:Answers,settings?:ProposalSettings,mode:'allocate'|'mandate'='allocate'):InterviewPlan{
  const a=sanitizeAnswers(raw),r=assessInterview(a),options=validateProposalSettings(settings);
  const required=[...r.missing];
  for(const key of ['initial','savings','nearCosts','income','expenses','debtPayment','monthly','maxLoss'])if(typeof a[key]!=='number'&&!required.includes(key))required.push(key);
@@ -43,16 +43,28 @@ export function buildInterviewPlan(raw:Answers,settings?:ProposalSettings):Inter
  if(r.blockers.some(i=>['reaction-conflict','experience-conflict'].includes(i.id)))return planning('Las respuestas contienen contradicciones sobre las pérdidas o la experiencia. Revisa las respuestas señaladas antes de elegir productos.');
  const lossPct=n('maxLoss')/r.initial*100;
  if(lossPct<ROLE_SHOCK.overnight)return planning('La pérdida aceptada no alcanza ni el escenario ilustrativo del bloque a un día. Revisa una solución de protección bancaria y sus condiciones.');
- const experienceCap=['none','deposit','unknown'].includes(String(a.experience))||['never','rare'].includes(String(a.frequency))?40:80;
+ const experienceCap=['none','deposit','unknown'].includes(String(a.experience))||['never','rare'].includes(String(a.frequency))?40:100;
  let equity=Math.floor(Math.min(r.capacity,r.tolerance,r.preference,experienceCap)/5)*5;
  reasons.push(`Límites derivados de las respuestas: capacidad económica y plazo ${r.capacity} %, tolerancia a pérdidas ${r.tolerance} %, preferencia estabilidad/crecimiento ${r.preference} % y experiencia ${experienceCap} %. Se utiliza el menor y después se aplica el presupuesto de pérdidas.`);
  if(options.variant==='cautious')equity=Math.floor(equity/2/5)*5;
+ if(mode==='mandate'){
+  const cap=Math.min(r.capacity,r.tolerance,r.preference,experienceCap)*(options.variant==='cautious'?.5:1);
+  const roles:ProductRole[]=a.horizon==='short'?['overnight']:a.horizon==='medium'||options.variant==='cautious'?['overnight','short','equity']:['overnight','short','aggregate','equity'];
+  // A mandate describes admissible exposures, not a preliminary fund selection.
+  // These internal class keys are replaced by real fund IDs when a model is assigned.
+  snapshot.optimization={ids:roles.map(role=>'mandate-'+role),roles,means:roles.map(role=>ROLE_MODEL[role].mean),cov:modelCovariance(roles),riskFree:2.2,equityCap:cap,lossLimit:lossPct,goal:inferGoal(a),modelVersion:MODEL_VERSION,basis:'assumptions',candidateCount:0,step:5};
+  return {kind,canCreate:true,title:'Reparto de referencia de la entrevista',description:kind==='objective'?'Objetivo condicionado a completar reservas o resolver las condiciones señaladas.':'Capital disponible después de separar reservas y gastos próximos.',holdings:[],amount,available:r.available,required:[],issues:r.blockers.filter(i=>!adapted.has(i.id)),proposal:snapshot,comparisons:[]};
+ }
  const long=['long','verylong'].includes(String(a.horizon));
  let defensive:ProductRole=a.horizon==='short'?'overnight':lossPct>=15&&long&&r.capacity>=40?'aggregate':lossPct>=7&&r.tolerance>0?'short':lossPct>=3?'ultrashort':'overnight';
  if(options.variant==='cautious'&&defensive==='aggregate')defensive='short';
  while(equity>0&&(equity*50+(100-equity)*ROLE_SHOCK[defensive])/100>lossPct)equity-=5;
  const ladder:ProductRole[]=['aggregate','short','ultrashort','overnight'];
  while(ROLE_SHOCK[defensive]>lossPct&&defensive!=='overnight')defensive=ladder[ladder.indexOf(defensive)+1]!;
+ if(options.priority==='funds'&&options.allowEtfFallback===false&&!compareProducts(defensive,amount/20,options).some(p=>p.selected)){
+  const fallback=ladder.slice(ladder.indexOf(defensive)+1).find(role=>compareProducts(role,amount/20,options).some(p=>p.selected));
+  if(fallback){reasons.push('No hay un fondo elegible en el bloque defensivo inicialmente previsto. Se utiliza un bloque de menor riesgo de escenario: '+ROLE_LABELS[fallback]+'.');defensive=fallback;}
+ }
  const roles:ProductRole[]=[...(equity>0?['equity' as ProductRole]:[]),defensive,...(defensive==='aggregate'?['short' as ProductRole]:[])];
  const candidates=roles.map(role=>compareProducts(role,amount/20,options).find(x=>x.selected)).map(row=>row&&productById(row.id));
  if(candidates.some(p=>!p))return planning('No queda un producto elegible para alguno de los bloques. Revisa las exclusiones y el acceso al catálogo.');
@@ -72,6 +84,7 @@ export function buildInterviewPlan(raw:Answers,settings?:ProposalSettings):Inter
   if(amounts[i]!>0)positions.push({assetId:p.id,name:p.name,isin:p.isin,role:b.role,weight:b.weight,amount:amounts[i]!,monthly:monthlies[i]!,fee:p.fee,source:p.source});
   if(options.priority==='funds'&&p.vehicle==='ETF')conditions.push('Para «'+ROLE_LABELS[b.role]+'» no hay un fondo elegible en este estudio. Se muestra un ETF como alternativa, sin atribuirle el régimen fiscal de los fondos.');
   if(p.developedOnly)conditions.push('El fondo de empresas elegido cubre mercados desarrollados; esta alternativa no incorpora emergentes.');
+  if(p.vehicle==='Fondo'&&!options.fundAccessConfirmed&&options.fundAccessMode==='study')conditions.push('Clase propuesta para estudio: '+p.isin+'. Antes de contratar confirma comercialización, mínimo efectivo y acceso con el intermediario'+(p.minimumDirect?'; mínimo directo publicado: '+p.minimumDirect.toLocaleString('es-ES')+' EUR.':'.'));
  }
  for(const p of positions)p.weight=p.amount/amount*100;
  const actualMonthly=distribute(monthly,positions.map(p=>p.weight));positions.forEach((p,i)=>{p.monthly=actualMonthly[i]!;});
@@ -86,5 +99,6 @@ export function buildInterviewPlan(raw:Answers,settings?:ProposalSettings):Inter
 }
 export function generationMessage(plan:InterviewPlan):string{
  if(plan.canCreate)return plan.description;
+ if(!plan.required.length)return plan.description;
  return 'Revisa estos datos antes de generar: '+plan.required.map(id=>QUESTIONS.find(q=>q.id===id)?.title??id).join(' · ');
 }

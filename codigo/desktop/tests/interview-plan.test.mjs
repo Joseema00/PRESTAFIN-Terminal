@@ -8,7 +8,7 @@ const settings=patch=>({...DEFAULT_PROPOSAL_SETTINGS,...patch});
 const plan=(patch={},options)=>buildInterviewPlan({...healthyAnswers(),...patch},options);
 test('long horizon produces a funded global portfolio with concrete ISINs and no pending cash',()=>{
  const p=plan({initial:20000.01});assert.equal(p.kind,'investment');assert.equal(p.canCreate,true);
- assert.ok(Math.abs(p.proposal.equity-80)<.001);assert.equal(Math.round(p.holdings.reduce((s,h)=>s+h.amount,0)*100),2000001);
+ assert.ok(Math.abs(p.proposal.equity-95)<.001);assert.equal(Math.round(p.holdings.reduce((s,h)=>s+h.amount,0)*100),2000001);
  assert.equal(p.holdings[0].meta.isin,'IE00BK5BQT80');assert.ok(p.holdings.some(h=>h.meta.isin==='IE00BG47KH54'));assert.ok(p.holdings.every(h=>h.assetId!==PENDING_CASH_ID));
  assert.deepEqual(validatePortfolioProposal(p.proposal),p.proposal);
 });
@@ -47,7 +47,7 @@ test('unknown risk preferences and budget data point to the actual question inst
 test('product selection compares peers and changes for coverage, fund preference and explicit exclusions',()=>{
  assert.equal(plan({},settings({priority:'coverage'})).proposal.positions.find(p=>p.role==='equity').isin,'IE00B3YLTY66');
  assert.equal(plan({},settings({excluded:['research-vwce']})).proposal.positions.find(p=>p.role==='equity').isin,'IE000716YHJ7');
- const funds=plan({},settings({priority:'funds',fundAccessConfirmed:true}));assert.ok(funds.proposal.positions.some(p=>p.isin==='IE00BYX5NX33'));assert.ok(funds.proposal.positions.some(p=>p.isin==='IE00B18GC888'));
+ const funds=plan({balance:'balanced'},settings({priority:'funds',fundAccessConfirmed:true}));assert.ok(funds.proposal.positions.some(p=>p.isin==='IE00BYX5NX33'));assert.ok(funds.proposal.positions.some(p=>p.isin==='IE00B18GC888'));
  assert.match(funds.proposal.conditions.join(' '),/no incorpora emergentes/);
  const noAccess=compareProducts('aggregate',10000,settings({priority:'funds'}));assert.equal(noAccess.find(p=>p.id==='research-vanguard-bond-fund').eligible,false);
  const blocked=plan({},settings({excluded:INVESTMENT_PRODUCTS.filter(p=>p.role==='equity').map(p=>p.id)}));assert.equal(blocked.kind,'planning');assert.match(blocked.description,/No queda un producto elegible/);

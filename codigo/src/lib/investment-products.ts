@@ -1,9 +1,10 @@
 /** Curated issuer research, not a live market feed or a list of every available product. */
-export const RESEARCH_DATE='2026-10-29';
+export const RESEARCH_DATE='2026-10-30';
 export type ProductRole='overnight'|'ultrashort'|'short'|'aggregate'|'equity';
-export const ROLE_LABELS:Record<ProductRole,string>={overnight:'Disponibilidad y tipos a un día',ultrashort:'Bonos de vencimiento muy corto',short:'Bonos de gobiernos a corto plazo',aggregate:'Bonos globales con cobertura a euros',equity:'Empresas de todo el mundo'};
+export const ROLE_LABELS:Record<ProductRole,string>={overnight:'Disponibilidad y tipos a un día',ultrashort:'Bonos de vencimiento muy corto',short:'Bonos de corta duración',aggregate:'Bonos globales con cobertura a euros',equity:'Empresas de todo el mundo'};
 export type InvestmentProduct={id:string;name:string;isin:string;vehicle:'ETF'|'Fondo';role:ProductRole;fee:number;feeLabel:'TER'|'OCF';income:'Acumulación'|'Distribución';coverage:string;currencyRisk:string;replication:string;risk:string;source:string;minimumDirect?:number;credit?:boolean;allCap?:boolean;developedOnly?:boolean;coreEligible?:boolean};
 export const INVESTMENT_PRODUCTS:InvestmentProduct[]=[
+ {id:'fund-amundi-money',name:'Amundi Euro Liquidity Short Term Responsible E (C)',isin:'FR0011176635',vehicle:'Fondo',role:'overnight',fee:.20,feeLabel:'OCF',income:'Acumulación',coverage:'Fondo monetario de corto plazo en EUR; instrumentos monetarios de alta calidad, con emisores públicos y privados.',currencyRisk:'Exposición en EUR; el mandato cubre los títulos en otras divisas.',replication:'Gestión activa de instrumentos monetarios',credit:true,risk:'No garantiza el capital ni es un depósito. Riesgos de crédito, liquidez y tipos; acceso y mínimos del comercializador pendientes de comprobar. El KID separa un 0,03 % de costes de operación estimados, no incluido en el 0,20 % corriente.',source:'https://www.amundi.es/retail/dl/doc/kid-priips/FR0011176635/SPA/ESP'},
  {id:'research-xeon',name:'Xtrackers II EUR Overnight Rate Swap UCITS ETF 1C',isin:'LU0290358497',vehicle:'ETF',role:'overnight',fee:.10,feeLabel:'TER',income:'Acumulación',coverage:'Tipo de interés a un día en euros; índice €STR + 8,5 puntos básicos.',currencyRisk:'Exposición en EUR.',replication:'Sintética mediante swap',risk:'Riesgo de contraparte y de mercado. No es un depósito ni garantiza el capital; puede perder valor.',source:'https://etf.dws.com/en-lu/LU0290358497-eur-overnight-rate-swap-ucits-etf-1c/'},
  {id:'research-iege',name:'iShares € Govt Bond 0–1yr UCITS ETF EUR Dist',isin:'IE00B3FH7618',vehicle:'ETF',role:'ultrashort',fee:.07,feeLabel:'TER',income:'Distribución',coverage:'Deuda pública en euros con vencimientos inferiores a un año.',currencyRisk:'Bonos denominados en EUR.',replication:'Física por muestreo',risk:'Riesgos de tipos y de emisor. El fondo renueva su cartera: no tiene un vencimiento que garantice recuperar el capital.',source:'https://www.ishares.com/uk/individual/en/products/251741/ishares-euro-government-bond-01yr-ucits-etf'},
  {id:'research-erne',name:'iShares € Ultrashort Bond UCITS ETF EUR Dist',isin:'IE00BCRY6557',vehicle:'ETF',role:'ultrashort',fee:.09,feeLabel:'TER',income:'Distribución',coverage:'Bonos corporativos en euros de grado de inversión y vencimientos muy cortos.',currencyRisk:'Bonos denominados en EUR.',replication:'Física por muestreo',credit:true,risk:'Añade riesgo de crédito empresarial, impago y liquidez. No equivale a una cuenta remunerada.',source:'https://www.ishares.com/uk/individual/en/literature/fact-sheet/erne-ishares-ultrashort-bond-ucits-etf-fund-fact-sheet-en-gb.pdf'},
@@ -22,13 +23,15 @@ export const INVESTMENT_PRODUCTS:InvestmentProduct[]=[
  {id:'fund-vanguard-euro-gov',name:'Vanguard Euro Government Bond Index Fund EUR Acc',isin:'IE0007472990',vehicle:'Fondo',role:'aggregate',fee:.12,feeLabel:'OCF',income:'Acumulación',coverage:'Bonos de gobiernos de la zona euro de grado de inversión y vencimiento superior a un año.',currencyRisk:'Bonos denominados en EUR.',replication:'Física por muestreo',minimumDirect:1000000,coreEligible:false,risk:'Duración y riesgo soberano. No equivale a bonos cortos ni garantiza el capital.',source:'https://fund-docs.vanguard.com/ie0007472990-en.pdf'},
 ];
 export const productById=(id:string)=>INVESTMENT_PRODUCTS.find(p=>p.id===id);
-export type ProposalSettings={priority:'cost'|'coverage'|'funds';variant:'base'|'cautious';excluded:string[];fundAccessConfirmed:boolean};
+export type ProposalSettings={priority:'cost'|'coverage'|'funds';variant:'base'|'cautious';excluded:string[];fundAccessConfirmed:boolean;fundAccessMode?:'study';allowEtfFallback?:boolean;objective?:'stability'|'sharpe'|'growth'};
 export const DEFAULT_PROPOSAL_SETTINGS:ProposalSettings={priority:'cost',variant:'base',excluded:[],fundAccessConfirmed:false};
 export function validateProposalSettings(value:unknown):ProposalSettings{
  if(value===undefined)return {...DEFAULT_PROPOSAL_SETTINGS,excluded:[]};
  const v=value as ProposalSettings;
  if(!v||!['cost','coverage','funds'].includes(v.priority)||!['base','cautious'].includes(v.variant)||typeof v.fundAccessConfirmed!=='boolean'||!Array.isArray(v.excluded)||v.excluded.length>INVESTMENT_PRODUCTS.length||v.excluded.some(id=>!productById(id))||new Set(v.excluded).size!==v.excluded.length)throw new Error('Preferencias de selección no válidas');
- return {priority:v.priority,variant:v.variant,excluded:[...v.excluded].sort(),fundAccessConfirmed:v.fundAccessConfirmed};
+ if(v.fundAccessMode!==undefined&&v.fundAccessMode!=='study'||v.allowEtfFallback!==undefined&&typeof v.allowEtfFallback!=='boolean')throw new Error('Condiciones del universo de selección no válidas');
+ if(v.objective!==undefined&&!['stability','sharpe','growth'].includes(v.objective))throw new Error('Objetivo de la alternativa no válido');
+ return {priority:v.priority,variant:v.variant,excluded:[...v.excluded].sort(),fundAccessConfirmed:v.fundAccessConfirmed,...(v.fundAccessMode?{fundAccessMode:v.fundAccessMode}:{}),...(v.allowEtfFallback!==undefined?{allowEtfFallback:v.allowEtfFallback}:{}),...(v.objective?{objective:v.objective}:{})};
 }
 export type ProductComparison={id:string;eligible:boolean;selected:boolean;reason:string};
 export function compareProducts(role:ProductRole,amount:number,options:ProposalSettings):ProductComparison[]{
@@ -37,7 +40,8 @@ export function compareProducts(role:ProductRole,amount:number,options:ProposalS
   let reason='';
   if(p.coreEligible===false)reason='Exposición complementaria; disponible en carteras modelo, no sustituye automáticamente al núcleo global.';
   else if(options.excluded.includes(p.id))reason='Excluido por el asesor.';
-  else if(p.vehicle==='Fondo'&&!options.fundAccessConfirmed&&(!p.minimumDirect||amount<p.minimumDirect))reason='Acceso o mínimo del comercializador sin confirmar.';
+  else if(p.vehicle==='ETF'&&options.priority==='funds'&&options.allowEtfFallback===false)reason='El estudio está limitado a fondos de inversión; los ETF requieren permitir alternativas.';
+  else if(p.vehicle==='Fondo'&&!options.fundAccessConfirmed&&options.fundAccessMode!=='study'&&(!p.minimumDirect||amount<p.minimumDirect))reason='Acceso o mínimo del comercializador sin confirmar.';
   else if(options.priority!=='funds'&&p.vehicle==='Fondo')reason='Alternativa en formato fondo; activa esa preferencia para compararla en la selección.';
   return {id:p.id,eligible:!reason,selected:false,reason};
  });
@@ -47,6 +51,6 @@ export function compareProducts(role:ProductRole,amount:number,options:ProposalS
   return score(x)-score(y)||x.id.localeCompare(y.id);
  });
  if(sorted[0])sorted[0].selected=true;
- for(const row of rows)if(row.eligible){const p=productById(row.id)!;row.reason=row.selected?(p.vehicle==='Fondo'?'Preferencia por fondos y acceso compatible; revisar régimen fiscal individual.':options.priority==='coverage'&&p.allCap?'Mayor cobertura, incluidas pequeñas empresas.':'Menor coste corriente entre las alternativas elegibles de exposición comparable; se prioriza deuda pública frente a crédito empresarial en el bloque muy corto.'):'Alternativa elegible. No se añade junto a otro producto del mismo bloque para evitar solapamientos.';}
+ for(const row of rows)if(row.eligible){const p=productById(row.id)!;row.reason=row.selected?(p.vehicle==='Fondo'?(options.fundAccessMode==='study'&&!options.fundAccessConfirmed?'Fondo seleccionado para estudio; acceso y mínimo del comercializador pendientes.':'Preferencia por fondos y acceso compatible; revisar régimen fiscal individual.'):options.priority==='coverage'&&p.allCap?'Mayor cobertura, incluidas pequeñas empresas.':'Menor coste corriente entre las alternativas elegibles de exposición comparable; se prioriza deuda pública frente a crédito empresarial en el bloque muy corto.'):'Alternativa elegible. No se añade junto a otro producto del mismo bloque para evitar solapamientos.';}
  return rows;
 }

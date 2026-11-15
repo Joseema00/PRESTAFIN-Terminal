@@ -6,6 +6,8 @@
 import type { DividendPoint, Frequency, Instrument, InstrumentKind, SeriePoint, SplitPoint } from "./types";
 import { fundByIsin,FUND_DETAILS } from '../fund-catalog';
 import { fetchVanguardHistory } from './fund-provider.server';
+import { fetchFtHistory } from './ft-funds.server';
+import { normalizeIsin } from '../fund-lookup';
 
 export type ProviderSeries = {
   instrument: Instrument;
@@ -366,17 +368,19 @@ export async function fetchHistoryChain(
   kind?: InstrumentKind,
 ): Promise<ChainResult> {
   const attempts: string[] = [];
-  const fund=fundByIsin(symbol);
-  if(fund&&FUND_DETAILS[fund.id]?.portId){
-    try{return {ok:true,series:await fetchVanguardHistory(symbol),provider:'vanguard',attempts:['vanguard']};}
-    catch(e){return {ok:false,error:e instanceof Error?e.message:String(e),attempts:['vanguard']};}
-  }
-  if(fund){
-    const matches=await searchChain(symbol,12),exact=matches.find(x=>x.isin===symbol&&x.kind==='Fondo');
-    if(!exact||exact.symbol===symbol)return {ok:false,error:'El proveedor no identifica la clase exacta '+symbol+'. No se sustituye por otra clase.',attempts:['identity-check']};
-    const result=await fetchHistoryChain(exact.symbol,frequency,'Fondo');
-    if(result.ok){if(result.series.currency!=='EUR'||result.series.instrument.kind!=='Fondo')return {ok:false,error:'La divisa o el tipo de instrumento no coincide con la clase solicitada.',attempts:result.attempts};result.series.instrument={...result.series.instrument,symbol,isin:symbol,name:fund.name};}
-    return result;
+  if(/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(symbol)){
+    try{symbol=normalizeIsin(symbol);}catch(e){return {ok:false,error:e instanceof Error?e.message:String(e),attempts:['identity-check']};}
+    const fund=fundByIsin(symbol);
+    if(fund&&FUND_DETAILS[fund.id]?.portId){
+      attempts.push('vanguard');
+      try{return {ok:true,series:await fetchVanguardHistory(symbol),provider:'vanguard',attempts};}catch{/* Exact-ISIN NAV source below. */}
+    }
+    attempts.push('ft-funds');
+    try{
+      const series=await fetchFtHistory(symbol);
+      if(fund&&series.currency!=='EUR')throw new Error('La divisa recibida no coincide con la clase EUR del catálogo.');
+      return {ok:true,series,provider:'ft-funds',attempts};
+    }catch(e){return {ok:false,error:e instanceof Error?e.message:String(e),attempts};}
   }
   let lastError = "Sin proveedores disponibles";
   for (const p of PROVIDERS) {

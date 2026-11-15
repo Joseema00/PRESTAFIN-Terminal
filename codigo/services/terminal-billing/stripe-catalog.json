@@ -1,0 +1,27 @@
+{
+  "account": "acct_1U45pWA8vZ76Jnv6",
+  "livemode": true,
+  "product": "prod_VXMlvizQkJ5Z7Z",
+  "name": "PRESTAFIN-TERMINAL",
+  "currency": "eur",
+  "tax_behavior": "inclusive",
+  "trial_days_in_checkout": 0,
+  "prices": {
+    "month": {
+      "id": "price_1UWI1UA8vZ76Jnv6SBla8q9E",
+      "unit_amount": 5000
+    },
+    "year": {
+      "id": "price_1UWI1zA8vZ76Jnv6Dc4P6zJt",
+      "unit_amount": 49000
+    }
+  },
+  "portal_configuration": "bpc_1UWI2yA8vZ76Jnv6IV6vjCZn",
+  "verified_on": "2026-10-31",
+  "activation_status": "server_configured_live_pending_confirmed_tax_registration_and_payment_tests",
+  "tax_registrations_at_check": 0,
+  "note": "Public resource identifiers, not secrets. No trial in Checkout. PRESTAFIN30 is handled by the account license service. Catalog creation does not activate app payments.",
+  "billing_url": "https://cpauzzbjcesctgpvnzax.supabase.co/functions/v1/terminal-billing",
+  "webhook_id": "we_1UWYGvA8vZ76Jnv6b22uc300",
+  "webhook_status": "enabled"
+}

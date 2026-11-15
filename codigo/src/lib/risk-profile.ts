@@ -93,7 +93,7 @@ export function reviewInterview(i:Interview,adviser:string,notes:string,nextRevi
 export type Interview = {
   id:string; alias:string; createdAt:number; updatedAt:number; step:number; revision:number;
   rulesVersion:1; answers:Answers; review?:InterviewReview; proposalSettings?:ProposalSettings;
-  generated?:{portfolioId:string; revision:number; createdAt:number; kind?:'investment'|'planning'|'objective'; planVersion?:2|3|4};
+  generated?:{portfolioId:string; revision:number; createdAt:number; kind?:'investment'|'planning'|'objective'; planVersion?:2|3|4|5|6|7|8|9|10;modelLibraryRevision?:number};
 };
 export function changeInterviewAnswer(interview:Interview,key:string,value:Answer|undefined,now=Date.now()):Interview {
   const q=QUESTIONS.find(item=>item.id===key);
@@ -146,9 +146,10 @@ export function validateInterviews(value:unknown):Interview[] {
     const review=v.review;
     if(review && (!integer(review.revision)||review.revision>v.revision||!integer(review.reviewedAt)||!text(review.adviser,180)||!text(review.notes,4000)||!/^\d{4}-\d{2}-\d{2}$/.test(review.nextReviewDate)||!Number.isFinite(Date.parse(review.nextReviewDate))))throw new Error('Revisión de entrevista no válida');
     const g=v.generated;
-    if (g && ((g.kind!==undefined&&!['investment','planning','objective'].includes(g.kind))||(g.planVersion!==undefined&&![2,3,4].includes(g.planVersion))))throw new Error('Tipo de cartera de entrevista no válido');
+    if (g && ((g.kind!==undefined&&!['investment','planning','objective'].includes(g.kind))||(g.planVersion!==undefined&&![2,3,4,5,6,7,8,9,10].includes(g.planVersion))))throw new Error('Tipo de cartera de entrevista no válido');
+    if(g?.modelLibraryRevision!==undefined&&(!Number.isSafeInteger(g.modelLibraryRevision)||g.modelLibraryRevision<0))throw new Error('Revisión de modelos generados no válida');
     if (g && (!text(g.portfolioId,160) || !integer(g.revision) || g.revision>v.revision || !integer(g.createdAt))) throw new Error('Cartera de entrevista no válida');
-    return {id:v.id,alias:v.alias,createdAt:v.createdAt,updatedAt:v.updatedAt,step:v.step,revision:v.revision,rulesVersion:1 as const,answers:sanitizeAnswers(v.answers),...(v.proposalSettings!==undefined?{proposalSettings:validateProposalSettings(v.proposalSettings)}:{}),...(review?{review:{revision:review.revision,reviewedAt:review.reviewedAt,adviser:review.adviser,notes:review.notes,nextReviewDate:review.nextReviewDate}}:{}),...(g ? {generated:{portfolioId:g.portfolioId,revision:g.revision,createdAt:g.createdAt,...(g.kind?{kind:g.kind}:{}),...(g.planVersion?{planVersion:g.planVersion}:{})}} : {})};
+    return {id:v.id,alias:v.alias,createdAt:v.createdAt,updatedAt:v.updatedAt,step:v.step,revision:v.revision,rulesVersion:1 as const,answers:sanitizeAnswers(v.answers),...(v.proposalSettings!==undefined?{proposalSettings:validateProposalSettings(v.proposalSettings)}:{}),...(review?{review:{revision:review.revision,reviewedAt:review.reviewedAt,adviser:review.adviser,notes:review.notes,nextReviewDate:review.nextReviewDate}}:{}),...(g ? {generated:{portfolioId:g.portfolioId,revision:g.revision,createdAt:g.createdAt,...(g.kind?{kind:g.kind}:{}),...(g.planVersion?{planVersion:g.planVersion}:{}),...(g.modelLibraryRevision!==undefined?{modelLibraryRevision:g.modelLibraryRevision}:{})}} : {})};
   });
 }
 const lookup = (value:Answer|undefined,table:Record<string,number>,fallback=0) => typeof value==='string' ? table[value] ?? fallback : fallback;
@@ -168,7 +169,7 @@ export function assessInterview(raw:Answers):Assessment {
   const reserve=round(costs*reserveMonths);
   const available=round(Math.max(0,n('savings')-n('nearCosts')-reserve));
   const monthlySurplus=round(Math.max(0,n('income')-costs));
-  const horizonCap=lookup(a.horizon,{short:0,medium:20,long:60,verylong:80});
+  const horizonCap=lookup(a.horizon,{short:0,medium:20,long:60,verylong:100});
   let capacity=horizonCap;
   const limitCapacity=(cap:number,reason:string) => {capacity=Math.min(capacity,cap);reasons.push(reason);};
   if (!missing.length) {
@@ -199,12 +200,12 @@ export function assessInterview(raw:Answers):Assessment {
   if (a.withdrawals==='occasional') limitCapacity(40,'Podrían hacer falta retiradas ocasionales.');
   if (a.impact==='goal') limitCapacity(20,'Una pérdida pondría en peligro un objetivo importante.');
   if (a.impact==='adjust') limitCapacity(60,'Una pérdida requeriría ajustar otros planes.');
-  const loss10=lookup(a.loss10,{sell:0,reduce:20,hold:65,add:80});
-  const loss25=lookup(a.loss25,{sell:0,reduce:25,hold:65,add:80});
-  const sleep=lookup(a.sleep,{severe:0,worried:25,calm:80});
-  const tradeoff=lookup(a.tradeoff,{peace:20,mixed:50,growth:80});
+  const loss10=lookup(a.loss10,{sell:0,reduce:20,hold:100,add:100});
+  const loss25=lookup(a.loss25,{sell:0,reduce:25,hold:100,add:100});
+  const sleep=lookup(a.sleep,{severe:0,worried:25,calm:100});
+  const tradeoff=lookup(a.tradeoff,{peace:20,mixed:50,growth:100});
   const tolerance=Math.min(loss10,loss25,sleep,tradeoff);
-  const preference=lookup(a.balance,{stable:20,mostlyStable:35,balanced:50,growth:80});
+  const preference=lookup(a.balance,{stable:20,mostlyStable:35,balanced:50,growth:100});
   const knowledgePairs:[AnswerId,string][]=[['diversify','basket'],['bondKnowledge','changes'],['returnKnowledge','uncertain'],['inflation','less']];
   const knowledge=knowledgePairs.filter(([id,correct]) => a[id]===correct).length;
   if (!missing.length && knowledge<4) issue('knowledge','Hay conceptos que explicar y volver a comprobar antes de usar el reparto: repartir el dinero, posibles pérdidas, resultados pasados y precios. No es una nota sobre la persona.',...knowledgePairs.filter(([id,correct]) => a[id]!==correct).map(([id]) => id));
@@ -213,11 +214,11 @@ export function assessInterview(raw:Answers):Assessment {
   if (a.past==='sold' && tolerance>=50) warn('past','Antes vendiste durante pérdidas y ahora mantendrías el plan: pregunta qué ha cambiado.','past','loss10','loss25');
   if (preference>tolerance+20) warn('preference-conflict','La mezcla que prefieres implica más altibajos de los que indican tus reacciones. Se aplica el límite más prudente.','balance','sleep','loss25');
   if ((a.experience==='none' || a.experience==='unknown') && (a.frequency==='regular' || a.frequency==='often')) issue('experience-conflict','La experiencia y la frecuencia declaradas no encajan. Aclara qué productos y decisiones hubo.','experience','frequency');
-  const experienceCap=['none','deposit','unknown'].includes(String(a.experience)) || ['never','rare'].includes(String(a.frequency)) ? 40 : 80;
+  const experienceCap=['none','deposit','unknown'].includes(String(a.experience)) || ['never','rare'].includes(String(a.frequency)) ? 40 : 100;
   if (experienceCap===40) reasons.push('La experiencia limitada mantiene el ejemplo en un máximo del 40 % en empresas.');
   // Illustrative simultaneous shock: equities -50%, bonds -15%. NOT a maximum loss or quantile.
   const acceptedLossPct=initial>0 ? n('maxLoss')/initial*100 : 0;
-  const lossCap=Math.max(0,Math.min(80,Math.floor((acceptedLossPct-15)/.35/5)*5));
+  const lossCap=Math.max(0,Math.min(100,Math.floor((acceptedLossPct-15)/.35/5)*5));
   if (!missing.length && acceptedLossPct<15) issue('stress-budget','Incluso el bloque de bonos superaría la pérdida que aceptas en el escenario adverso ilustrativo. Necesita otra conversación sobre capital y liquidez.','maxLoss','guarantee');
   const equity=Math.max(0,Math.floor(Math.min(capacity,tolerance,preference,experienceCap,lossCap)/5)*5);
   const bonds=100-equity;

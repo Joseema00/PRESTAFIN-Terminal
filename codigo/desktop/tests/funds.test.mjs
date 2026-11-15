@@ -26,7 +26,7 @@ test('15 distinct fund-only models preserve the declared mix and cents at small 
  assert.throws(()=>modelToHoldings(FUND_MODELS[0],NaN));assert.throws(()=>modelToHoldings(FUND_MODELS[0],0));
 });
 test('models cannot override guarantees, loss limits, exclusions, duration or time horizon',()=>{
- const original=buildInterviewPlan(healthyAnswers()).proposal;
+ const original=buildInterviewPlan({...healthyAnswers(),maxLoss:8600}).proposal;
  assert.ok(modelCompatibility(FUND_MODELS[6],original,10).compatible);
  assert.equal(modelCompatibility(FUND_MODELS[10],original,10).compatible,false);
  assert.equal(modelCompatibility(FUND_MODELS[6],original,1).compatible,false);

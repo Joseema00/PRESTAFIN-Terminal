@@ -18,7 +18,7 @@ test('blank interview has no inferred preferences or actionable allocation',()=>
 test('completed interview separates reserves from invested capital and conserves cents',()=>{
   const a={...answers(),initial:20000.01};const r=assessInterview(a);
   assert.equal(r.ready,true);assert.equal(r.reserve,9000);assert.equal(r.available,46000);assert.equal(r.monthlySurplus,2500);
-  assert.equal(r.equity,80);assert.equal(r.bonds,20);assert.equal(r.stressLoss,8600);
+  assert.equal(r.equity,95);assert.equal(r.bonds,5);assert.equal(r.stressLoss,9650);
   const holdings=interviewHoldings(a);assert.equal(holdings.length,2);
   assert.ok(Math.abs(holdings.reduce((s,h)=>s+h.amount,0)-20000.01)<1e-8);
   assert.deepEqual(holdings.map(h=>h.assetId),['vwce','agh']);
@@ -39,7 +39,7 @@ test('a higher financial target never raises the assigned risk',()=>{
   assert.equal(small.equity,large.equity);assert.equal(large.ready,true);assert.ok(large.warnings.some(i=>i.id==='goal-gap'));
 });
 test('a smaller acceptable euro loss never raises risk, and too-small budgets stop creation',()=>{
-  let previous=80;
+  let previous=100;
   for(const maxLoss of [10000,8500,7000,5500,4000,3000]){const r=assessInterview({...answers(),maxLoss});assert.equal(r.ready,true);assert.ok(r.equity<=previous);assert.ok(r.stressLoss<=maxLoss+.01);previous=r.equity;}
   assert.ok(has({...answers(),maxLoss:2999},'stress-budget'));
   assert.ok(has({...answers(),maxLoss:0},'loss-rejection'));
@@ -76,7 +76,7 @@ test('scenario questions use the persons own amount and exports include plain an
   const q=QUESTIONS.find(q=>q.id==='loss25');const text=questionTitle(q,{initial:20000});
   assert.ok(text.includes('20.000'));assert.ok(text.includes('15.000'));assert.ok(!text.includes('{'));
   const i=interview();i.answers.story='Me preocupa el dinero para mi familia.';
-  const report=interviewReport(i);assert.ok(report.includes('Me preocupa el dinero para mi familia.'));assert.ok(report.includes('Empresas (renta variable): 80%'));assert.ok(report.includes('No es un límite de pérdida'));
+  const report=interviewReport(i);assert.ok(report.includes('Me preocupa el dinero para mi familia.'));assert.ok(report.includes('Empresas (renta variable): 100%'));assert.ok(report.includes('No es un límite de pérdida'));
   i.answers.guarantee='required';assert.ok(!interviewReport(i).includes('Empresas (renta variable):'));
 });
 test('native import rejects corrupt interviews, unsafe amounts and incompatible versions',()=>{

@@ -1,0 +1,7 @@
+{
+  "apiUrl": "https://cpauzzbjcesctgpvnzax.supabase.co/functions/v1/terminal-billing",
+  "licensesEnabled": true,
+  "cloudEnabled": true,
+  "supabaseUrl": "https://cpauzzbjcesctgpvnzax.supabase.co",
+  "supabasePublishableKey": "sb_publishable_C2TJC6DywBG2W0Yh6NXP-A_oyuLL14c"
+}

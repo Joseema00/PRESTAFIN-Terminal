@@ -1,3 +1,5 @@
+import {planningContext,samePlanningContext} from '../src/lib/client-plan';
+import { saveInterviewPDF } from './interview-pdf';
 import { ProposalSummary,ProductStudy } from './proposal-view';
 import { proposalText } from '../src/lib/portfolio-proposal';
 import { INTERVIEW_PLAN_VERSION } from '../src/lib/interview-plan';
@@ -5,7 +7,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, ArrowRight, Check, ClipboardList, Download, Plus, Trash2, MessageCircle, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { usePeople } from './use-portfolios';
+import { usePeople,useModelLibrary } from './use-portfolios';
+import {buildModelPlan} from '../src/lib/account-models';
 import { buildInterviewPlan, generationMessage } from '../src/lib/interview-plan';
 import { parseMoneyInput } from '../src/lib/interview-input';
 import { isInterviewReviewed } from '../src/lib/risk-profile';
@@ -73,8 +76,9 @@ function Issues({items,onReview}:{items:Issue[];onReview:(id:string)=>void}) {
 }
 const band=(n:number) => n<=20?'Baja':n<=40?'Contenida':n<=60?'Media':'Alta';
 
-export function InterviewPage() {
-  const store=useInterviews();
+export function InterviewPage({documentOnly=false}:{documentOnly?:boolean}) {
+  const store=useInterviews(),people=usePeople();
+  const library=useModelLibrary();
   const interview=store.active;
   const navigate=useNavigate();
   const [showMissing,setShowMissing]=useState(false);
@@ -88,7 +92,7 @@ export function InterviewPage() {
   useEffect(()=>{setShowMissing(false);setConfirmDelete(false);heading.current?.focus({preventScroll:true});},[interview?.id,interview?.step]);
   const start=()=>{try{store.create();}catch(e){toast.error(e instanceof Error?e.message:'No se pudo crear la entrevista');}};
   const r=interview?assessInterview(interview.answers):null;
-  const plan=interview?buildInterviewPlan(interview.answers,interview.proposalSettings):null;
+  const plan=interview?buildModelPlan(interview.answers,library.models,interview.proposalSettings,people.active?planningContext(people.active):undefined):null;
   const total=QUESTIONS.filter(q=>!q.optional).length;
   const done=r?total-r.missing.length:0;
   const step=interview?.step??0;
@@ -104,11 +108,27 @@ export function InterviewPage() {
     // Rendering follows the store update; focus the actual control without hiding other questions.
     requestAnimationFrame(()=>document.querySelector<HTMLInputElement|HTMLTextAreaElement>('#question-'+id+' input, #question-'+id+' textarea')?.focus());
   }
+  async function assignCompleted(){
+    if(!interview)return;
+    const latest=store.current(interview.id);if(!latest)return;
+    const candidate=buildModelPlan(latest.answers,library.models,latest.proposalSettings,people.active?planningContext(people.active):undefined);
+    if(candidate.canCreate)store.generate(latest.id);
+    const saved=await store.saveNow();if(!saved.ok)throw new Error(saved.error??'No se pudo guardar en tu cuenta.');
+  }
+  async function finish(){
+    if(creating)return;setCreating(true);setGenerationError('');
+    try{await assignCompleted();go(INTERVIEW_STEPS.length);}catch(e){setGenerationError(e instanceof Error?e.message:'No se pudo guardar el resultado.');}finally{setCreating(false);}
+  }
+  async function downloadAnswers(){
+    if(!interview||creating)return;setCreating(true);setGenerationError('');
+    try{await assignCompleted();await saveInterviewPDF(store.current(interview.id)??interview,store.personName);}catch(e){setGenerationError(e instanceof Error?e.message:'No se pudo preparar el PDF.');}finally{setCreating(false);}
+  }
   function next() {
     if (!interview)return;
     const latest=store.current(interview.id)??interview;
     const missing=QUESTIONS.find(q=>q.step===step && !q.optional && latest.answers[q.id]===undefined);
     if(missing){setShowMissing(true);document.querySelector<HTMLInputElement>('#question-'+missing.id+' input')?.focus();return;}
+    if(step===INTERVIEW_STEPS.length-1){void finish();return;}
     go(step+1);
   }
   async function save(){
@@ -121,8 +141,8 @@ export function InterviewPage() {
     if(!interview || creating)return;
     const id=interview.id,latest=store.current(id);
     if(!latest)return;
-    const currentPlan=buildInterviewPlan(latest.answers,latest.proposalSettings);
-    const alreadyCreated=latest.generated?.planVersion===INTERVIEW_PLAN_VERSION&&latest.generated?.revision===latest.revision&&store.portfolios.some(p=>p.id===latest.generated?.portfolioId);
+    const currentPlan=buildModelPlan(latest.answers,library.models,latest.proposalSettings,people.active?planningContext(people.active):undefined);
+    const alreadyCreated=latest.generated?.modelLibraryRevision===library.revision&&latest.generated?.planVersion===INTERVIEW_PLAN_VERSION&&latest.generated?.revision===latest.revision&&store.portfolios.some(p=>p.id===latest.generated?.portfolioId&&samePlanningContext(p.proposal,people.active?planningContext(people.active):undefined));
     if(!alreadyCreated&&!currentPlan.canCreate){setGenerationError(generationMessage(currentPlan));review(currentPlan.required[0]!);setShowMissing(true);return;}
     setCreating(true);setGenerationError('');
     try{
@@ -135,25 +155,26 @@ export function InterviewPage() {
     }catch(e){if(mounted.current&&store.isCurrent(id)){const message=e instanceof Error?e.message:'No se pudo generar la cartera';setGenerationError(message);toast.error(message);}}
     finally{if(mounted.current)setCreating(false);}
   }
-  const existing=interview?.generated?.planVersion===INTERVIEW_PLAN_VERSION && interview.generated.revision===interview.revision && store.portfolios.some(p=>p.id===interview.generated?.portfolioId);
+  const existing=interview?.generated?.modelLibraryRevision===library.revision && interview?.generated?.planVersion===INTERVIEW_PLAN_VERSION && interview.generated.revision===interview.revision && store.portfolios.some(p=>p.id===interview.generated?.portfolioId&&samePlanningContext(p.proposal,people.active?planningContext(people.active):undefined));
   return <div className="interview-page">
-    <div className="terminal-page-title"><span>CONOCER ANTES DE INVERTIR</span><h1>Entrevista de inversión.</h1><p>Una conversación sobre su vida, su dinero y cómo se sentiría si las cosas no salen como espera. Sin pedirle que sepa de bolsa.</p></div>
-    <div className="interview-toolbar"><label><span className="sr-only">Elegir entrevista</span><select value={interview?.id??''} onChange={e=>store.select(e.target.value)} disabled={!store.interviews.length}><option value="" disabled>Selecciona una entrevista</option>{store.interviews.map(i=><option key={i.id} value={i.id}>{i.alias}</option>)}</select></label><button className="terminal-button" disabled={!store.writable || store.interviews.length>=100} onClick={start}><Plus size={16}/>Nueva entrevista</button><button className="terminal-button secondary" onClick={blankQuestionnaire}><Download size={15}/>Guion en blanco</button></div>
-    {!interview && <section className="terminal-panel interview-empty"><ClipboardList size={32}/><h2>Primero escucha. Después construye.</h2><p>{QUESTIONS.length} preguntas en seis bloques, con ejemplos adaptados al dinero que esa persona quiere invertir. Puedes pausar la entrevista y retomarla después.</p><div className="interview-empty-blocks">{INTERVIEW_STEPS.map((s,i)=><span key={s.title}><b>{String(i+1).padStart(2,'0')}</b>{s.title}</span>)}</div><button className="terminal-button" disabled={!store.writable} onClick={start}>Empezar entrevista <ArrowRight size={16}/></button><p className="interview-caption">Las respuestas se guardan en este ordenador. Puedes usar un alias; no hace falta DNI, teléfono ni correo.</p></section>}
+    <div className="terminal-page-title"><span>CONOCER ANTES DE INVERTIR</span><h1>{documentOnly?'Preparar PDF de respuestas':'Entrevista de inversión.'}</h1><p>Una conversación sobre su vida, su dinero y cómo se sentiría si las cosas no salen como espera. Sin pedirle que sepa de bolsa.</p></div>
+    <div className="interview-toolbar"><label><span className="sr-only">Elegir entrevista</span><select value={interview?.id??''} onChange={e=>store.select(e.target.value)} disabled={!store.interviews.length}><option value="" disabled>Selecciona una entrevista</option>{store.interviews.map(i=><option key={i.id} value={i.id}>{i.alias}</option>)}</select></label><button className="terminal-button" disabled={!store.writable || store.interviews.length>=100} onClick={start}><Plus size={16}/>{documentOnly?'Nuevo cuestionario':'Nueva entrevista'}</button>{!documentOnly&&<button className="terminal-button secondary" onClick={blankQuestionnaire}><Download size={15}/>Guion en blanco</button>}</div>
+    {!interview && <section className="terminal-panel interview-empty"><ClipboardList size={32}/><h2>Primero escucha. Después construye.</h2><p>{QUESTIONS.length} preguntas en seis bloques, con ejemplos adaptados al dinero que esa persona quiere invertir. Puedes pausar la entrevista y retomarla después.</p><div className="interview-empty-blocks">{INTERVIEW_STEPS.map((s,i)=><span key={s.title}><b>{String(i+1).padStart(2,'0')}</b>{s.title}</span>)}</div><button className="terminal-button" disabled={!store.writable} onClick={start}>Empezar entrevista <ArrowRight size={16}/></button><p className="interview-caption">Las respuestas se guardan vinculadas a tu cuenta. Puedes usar un alias; no hace falta DNI, teléfono ni correo.</p></section>}
     {interview && r && plan && <>
-      <div className="interview-identity"><Alias key={interview.id} interview={interview} writable={store.writable} onSave={name=>store.rename(interview.id,name)}/><div className="interview-progress"><span>{done} de {total} respuestas · {Object.values(interview.answers).filter(v=>v==='unknown').length} por aclarar</span><progress max={total} value={done} aria-label="Progreso de la entrevista"/><small>{store.saveError?'Hay cambios sin guardar':store.saving?'Guardando respuestas…':'Guardado local; puedes continuar más tarde'}</small><button className="terminal-button secondary" disabled={!store.writable||store.saving} onClick={()=>void save()}>Guardar ahora</button></div></div>
+      <div className="interview-identity"><Alias key={interview.id} interview={interview} writable={store.writable} onSave={name=>store.rename(interview.id,name)}/><div className="interview-progress"><span>{done} de {total} respuestas · {Object.values(interview.answers).filter(v=>v==='unknown').length} por aclarar</span><progress max={total} value={done} aria-label="Progreso de la entrevista"/><small>{store.saveError?'Hay cambios sin guardar':store.saving?'Guardando respuestas…':'Guardado en tu cuenta; puedes continuar más tarde'}</small><button className="terminal-button secondary" disabled={!store.writable||store.saving} onClick={()=>void save()}>Guardar ahora</button></div></div>
       {generationError&&<div className="interview-callout" role="alert"><AlertCircle size={20}/><p>{generationError}</p></div>}
       <div className="interview-layout"><nav className="interview-steps" aria-label="Bloques de la entrevista">{INTERVIEW_STEPS.map((s,index)=>{
         const group=QUESTIONS.filter(q=>q.step===index && !q.optional);const complete=group.every(q=>interview.answers[q.id]!==undefined&&interview.answers[q.id]!=='unknown');
         return <button key={s.title} className={step===index?'active':''} aria-current={step===index?'step':undefined} onClick={()=>go(index)}><span>{complete?<Check size={14}/>:String(index+1).padStart(2,'0')}</span><div>{s.title}<small>{group.filter(q=>interview.answers[q.id]!==undefined).length}/{group.length} respuestas</small></div></button>;
-      })}<button className={isResult?'active':''} aria-current={isResult?'step':undefined} onClick={()=>go(INTERVIEW_STEPS.length)}><span><ClipboardList size={15}/></span><div>Resultado y cartera<small>Revisar el conjunto</small></div></button><div className="interview-guide"><MessageCircle size={17}/><strong>Para quien entrevista</strong><p>Lee sin sugerir una opción. Pregunta «¿por qué?» y anota dudas con sus palabras. No intentes conseguir un perfil más arriesgado.</p></div></nav>
+      })}<button className={isResult?'active':''} aria-current={isResult?'step':undefined} onClick={()=>void finish()}><span><ClipboardList size={15}/></span><div>{documentOnly?'Documento PDF':'Resultado y cartera'}<small>Revisar el conjunto</small></div></button><div className="interview-guide"><MessageCircle size={17}/><strong>Para quien entrevista</strong><p>Lee sin sugerir una opción. Pregunta «¿por qué?» y anota dudas con sus palabras. No intentes conseguir un perfil más arriesgado.</p></div></nav>
       <fieldset className="interview-content" disabled={!store.writable}>
-      {!isResult?<section className="terminal-panel interview-form"><header><span>BLOQUE {step+1} / {INTERVIEW_STEPS.length}</span><h2 ref={heading} tabIndex={-1}>{INTERVIEW_STEPS[step]!.title}</h2><p>{INTERVIEW_STEPS[step]!.description}</p></header>{QUESTIONS.filter(q=>q.step===step).map(q=><QuestionField key={q.id} q={q} answers={interview.answers} showMissing={showMissing} onAnswer={(key,value)=>store.answer(interview.id,key,value)}/>)}<footer className="interview-actions"><button className="terminal-button secondary" disabled={step===0} onClick={()=>go(step-1)}><ArrowLeft size={15}/>Anterior</button><button className="terminal-button" onClick={next}>{step===INTERVIEW_STEPS.length-1?'Ver resultado':'Siguiente bloque'}<ArrowRight size={15}/></button></footer></section>:
+      {!isResult?<section className="terminal-panel interview-form"><header><span>BLOQUE {step+1} / {INTERVIEW_STEPS.length}</span><h2 ref={heading} tabIndex={-1}>{INTERVIEW_STEPS[step]!.title}</h2><p>{INTERVIEW_STEPS[step]!.description}</p></header>{QUESTIONS.filter(q=>q.step===step).map(q=><QuestionField key={q.id} q={q} answers={interview.answers} showMissing={showMissing} onAnswer={(key,value)=>store.answer(interview.id,key,value)}/>)}<footer className="interview-actions"><button className="terminal-button secondary" disabled={step===0} onClick={()=>go(step-1)}><ArrowLeft size={15}/>Anterior</button><button className="terminal-button" onClick={next}>{step===INTERVIEW_STEPS.length-1?(documentOnly?'Preparar PDF':'Ver resultado'):'Siguiente bloque'}<ArrowRight size={15}/></button></footer></section>:
       <div className="interview-result">
+        {documentOnly?<section className="terminal-panel chart-panel"><h2>PDF de las respuestas y modelo asignado</h2>{plan.proposal?.modelAssignment?<p>Modelo adecuado según las respuestas: <strong>{plan.proposal.modelAssignment.name}</strong>. {existing?'Asignado en sus carteras.':'Se asignará al preparar el documento.'} Revisa las condiciones de acceso y los puntos pendientes antes de invertir.</p>:<p>{generationMessage(plan)}</p>}{existing&&<button className="terminal-button secondary" onClick={()=>void navigate({to:'/portfolio-lab'})}>Abrir cartera asignada</button>}<p>Incluye las preguntas, las respuestas, la fecha y la revisión. Las preguntas pendientes aparecen como «Sin responder».</p><button className="terminal-button" disabled={creating} onClick={()=>void downloadAnswers()}>Descargar PDF de respuestas</button></section>:<>
         <section className="terminal-panel interview-result-intro"><span className="eyebrow">LECTURA DE LA ENTREVISTA</span><h2 ref={heading} tabIndex={-1}>{plan.title}</h2><p>{plan.description}</p><button className="terminal-button secondary" onClick={()=>downloadText(interviewReport(interview,false)+(plan.proposal?'\n\n'+proposalText(plan.proposal):''),'Prestafin-entrevista-'+interview.id.slice(0,8)+'.txt')}><Download size={15}/>Exportar respuestas y resumen</button></section>
         <section className="terminal-panel interview-create" aria-label="Generar cartera"><h3>{existing?'Tu cartera está creada':'Guardar esta propuesta en su ficha'}</h3>{plan.required.length>0&&<div className="interview-pending"><p>Datos necesarios para generar:</p>{plan.required.map(id=><button key={id} onClick={()=>review(id)}>{questionTitle(QUESTIONS.find(q=>q.id===id)!,interview.answers)} <ArrowRight size={13}/></button>)}</div>}{interview.generated&&!existing&&<p className="interview-caption">La cartera anterior se conserva. Esta generación usa el nuevo motor y las respuestas guardadas; no necesitas repetir la entrevista.</p>}<button className="terminal-button" disabled={!store.writable||creating} onClick={()=>void generate()}>{creating?'Guardando cartera…':existing?'Abrir cartera creada':!plan.canCreate?'Completar datos para generar':plan.kind==='objective'?'Generar cartera objetivo':plan.kind==='planning'?'Guardar plan de protección':'Generar borrador de inversión'}<ArrowRight size={16}/></button><p className="interview-caption">Se guarda en la ficha de {store.personName} y se abre automáticamente. Puedes ajustar el criterio y excluir productos en el estudio que aparece debajo.</p></section>
         {plan.proposal&&<ProposalSummary proposal={plan.proposal}/>}
-        <ProductStudy settings={interview.proposalSettings} comparisons={plan.comparisons} onChange={settings=>store.configure(interview.id,settings)}/>
+        <ProductStudy preferFundsOnly settings={plan.proposal?.settings??interview.proposalSettings} comparisons={plan.comparisons} onChange={settings=>store.configure(interview.id,settings)}/>
         {r.missing.length>0 && <section className="interview-callout" role="status"><AlertCircle size={20}/><div><h3>Faltan {r.missing.length} respuestas</h3><p>Completa las respuestas principales para crear el borrador correspondiente.</p><button onClick={()=>review(r.missing[0]!)}>Continuar por la primera pendiente <ArrowRight size={14}/></button></div></section>}
         {plan.issues.length>0 && <section className="terminal-panel interview-review"><h3>Puntos a revisar antes de invertir</h3><Issues items={plan.issues} onReview={review}/></section>}
         {r.complete && budgetIsKnown(interview.answers) && <section className="interview-budget"><div><span>Importe que quiere invertir</span><strong>{moneyLabel(r.initial)}</strong><small>Inicial · {moneyLabel(r.monthly)}/mes después</small></div><div><span>Colchón que se deja aparte</span><strong>{moneyLabel(r.reserve)}</strong><small>{r.reserveMonths} meses de gastos y cuotas</small></div><div><span>Disponible tras las reservas</span><strong>{moneyLabel(r.available)}</strong><small>Descontando también los gastos próximos</small></div></section>}
@@ -161,8 +182,8 @@ export function InterviewPage() {
         {r.warnings.length>0 && <section className="terminal-panel interview-review"><h3>Temas para comentar</h3><Issues items={r.warnings} onReview={review}/></section>}
         <details className="terminal-panel interview-glossary"><summary>Explicaciones sencillas para continuar la conversación</summary><dl><dt>Repartir el dinero</dt><dd>Invertir en muchas empresas reduce la dependencia de una sola. No elimina las pérdidas del conjunto.</dd><dt>Bonos o renta fija</dt><dd>Son préstamos a gobiernos o empresas. Su precio cambia y puede haber impagos; un fondo de bonos no garantiza recuperar todo cuando quieras salir.</dd><dt>Lo que pasó antes</dt><dd>Que una inversión ganara en el pasado no asegura que vaya a hacerlo después.</dd><dt>Precios y ahorro</dt><dd>Si los precios suben y tu dinero no crece, podrás comprar menos con él.</dd><dt>Estabilidad y crecimiento</dt><dd>Buscar más crecimiento suele exigir convivir con mayores altibajos. Ninguno de los dos bloques de esta cartera garantiza el capital.</dd></dl></details>
         <details className="terminal-panel interview-review-details"><summary>Revisión del asesor y próxima cita · independiente de la generación</summary><AdviserReview key={interview.id+':'+interview.revision} interview={interview} writable={store.writable} onReview={(adviser,notes,next)=>store.review(interview.id,adviser,notes,next)}/></details>
-        <p className="interview-disclaimer">Herramienta orientativa para conversar y simular; no es una evaluación de idoneidad validada. Las respuestas son información financiera personal y se incluyen en las copias locales, sin cifrar. No se envían a servicios externos.</p>
-      </div>}
+        <p className="interview-disclaimer">Herramienta orientativa para conversar y simular; no es una evaluación de idoneidad validada. Las respuestas son información financiera personal guardada en tu cuenta de Supabase. Las exportaciones que descargues contienen estos datos y debes custodiar esos archivos.</p>
+      </>} </div>}
       </fieldset></div>
       <div className="interview-bottom"><span>Último cambio: {new Date(interview.updatedAt).toLocaleString('es-ES')} · Revisión {interview.revision}</span>{confirmDelete?<div><span>¿Eliminar solo esta entrevista? La cartera se conserva.</span><button onClick={()=>{store.remove(interview.id);setConfirmDelete(false);}}>Sí, eliminar</button><button onClick={()=>setConfirmDelete(false)}>Cancelar</button></div>:<button onClick={()=>setConfirmDelete(true)}><Trash2 size={13}/>Eliminar entrevista</button>}</div>
     </>}

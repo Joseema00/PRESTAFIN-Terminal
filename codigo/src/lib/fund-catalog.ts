@@ -1,6 +1,7 @@
 import { INVESTMENT_PRODUCTS } from './investment-products';
 /** Exact share classes; no ETF proxies or other currencies. */
 export const FUND_DETAILS:Record<string,{manager:string;benchmark:string;inception:string;portId?:string;page:string;documentDate:string}>={
+ 'fund-amundi-money':{manager:'Amundi Asset Management',benchmark:'€STR capitalizado (referencia de comparación)',inception:'2012-01-20',page:'https://www.amundi.es/retail/dl/doc/kid-priips/FR0011176635/SPA/ESP',documentDate:'2026-08-19'},
  'research-fidelity':{manager:'Fidelity International',benchmark:'MSCI World',inception:'2018-03-20',page:'https://www.fidelityinternational.com/FILPS/Documents/en/current/ret.en.gb.IE00BYX5NX33.pdf',documentDate:'2026-03-31'},
  'research-vanguard-bond-fund':{manager:'Vanguard',benchmark:'Bloomberg Global Aggregate Float Adjusted and Scaled',inception:'2014-02-27',portId:'9197',page:'https://www.vanguard.co.uk/professional/product/fund/bond/9197/global-bond-index-fund-eur-hedged-acc',documentDate:'2026-10-29'},
  'fund-vanguard-world':{manager:'Vanguard',benchmark:'MSCI World',inception:'2002-12-10',portId:'9837',page:'https://www.vanguard.co.uk/professional/product/fund/equity/9837/global-stock-index-fund-eur-acc',documentDate:'2025-12-31'},

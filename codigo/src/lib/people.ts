@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS:WealthSettings = {contribGrowth:2,inflation:2.5,ta
 export const DEFAULT_MORTGAGE:MortgageProfile = {principal:0,rate:3.1,years:25,extraMonthly:0};
 export type Dossier = { portfolios:Portfolio[]; activeId:string; profile:WealthProfile; settings:WealthSettings; mortgage:MortgageProfile; interviews:Interview[]; activeInterviewId:string|null };
 export type Person = Dossier & { id:string; name:string; email:string; phone:string; reference:string; notes:string; createdAt:number; updatedAt:number; archived:boolean; legacy:boolean; simulator:Inputs|null; reportPreferences?:ReportPreferences; histories?:HistoricalData[]; wealthHistory?:WealthSnapshot[] };
-export type Workspace = { version:2; people:Person[]; activePersonId:string|null; selectedModules:number[]; adviser?:AdviserSettings };
+export type Workspace = { version:2; people:Person[]; activePersonId:string|null; selectedModules:number[]; adviser?:AdviserSettings;modelPortfolios?:import('./account-models').AccountModel[];modelLibraryRevision?:number };
 export type LegacyWorkspace = Dossier & { version:1; selectedModules:number[] };
 export type PersonDetails = Pick<Person,'name'|'email'|'phone'|'reference'|'notes'>;
 

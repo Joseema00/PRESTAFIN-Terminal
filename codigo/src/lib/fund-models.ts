@@ -22,15 +22,17 @@ export function modelStats(model:FundModel){
 export function modelToHoldings(model:FundModel,capital:number):Holding[]{
  if(!Number.isFinite(capital)||capital<=0||capital>1e12)throw new Error('Indica un capital positivo');modelStats(model);
  const roles=model.allocation.map(x=>productById(x.assetId)!.role),amounts=allocateCents(capital,model.allocation.map(x=>x.pct/100),roles);
- return model.allocation.map((x,i)=>{const p=productById(x.assetId)!;return {assetId:x.assetId,amount:amounts[i]!,meta:{symbol:p.isin,isin:p.isin,name:p.name,kind:'Fondo',currency:'EUR',cls:p.role==='equity'?'equity_dev' as const:'bond_gov' as const}};}).filter(h=>h.amount>0);
+ return model.allocation.map((x,i)=>{const p=productById(x.assetId)!;return {assetId:x.assetId,amount:amounts[i]!,meta:{symbol:p.isin,isin:p.isin,name:p.name,kind:'Fondo',currency:'EUR',cls:p.role==='equity'?'equity_dev' as const:p.role==='overnight'?'cash' as const:'bond_gov' as const}};}).filter(h=>h.amount>0);
 }
 export function modelCompatibility(model:FundModel,proposal?:PortfolioProposal,horizonYears?:number){
  const s=modelStats(model),reasons:string[]=[];
  if(!proposal)return {compatible:false,reviewed:false,reasons:['Sin entrevista completa vinculada: borrador independiente.']};
  if(proposal.kind==='planning')reasons.push('La entrevista exige protección o aclaraciones antes de seleccionar fondos.');
  const cap=proposal.optimization?.equityCap??proposal.equity,loss=proposal.optimization?.lossLimit??(proposal.amount?proposal.stressLoss/proposal.amount*100:0);
- if(s.equity>cap+.001)reasons.push(`Supera el límite de renta variable de ${cap.toFixed(1)} %.`);
- if(s.stress>loss+.001)reasons.push(`Escenario del modelo: ${s.stress.toFixed(1)} %; presupuesto de pérdida: ${loss.toFixed(1)} %.`);
+ if(s.equity>cap+1e-6)reasons.push(`Supera el límite de renta variable de ${cap.toFixed(1)} %.`);
+ const eur=(n:number)=>n.toLocaleString('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2});
+ const capitalCents=Math.round(proposal.amount*100);
+ if(Math.round(capitalCents*s.stress/100)>Math.round(capitalCents*loss/100))reasons.push(`Escenario del modelo: ${eur(proposal.amount*s.stress/100)} (${s.stress.toFixed(2)} %); presupuesto de pérdida: ${eur(proposal.amount*loss/100)} (${loss.toFixed(2)} %).`);
  const rank={overnight:0,ultrashort:1,short:2,aggregate:3,equity:4};
  const maxDefensive=Math.max(0,...(proposal.optimization?.roles??proposal.positions.map(p=>p.role)).filter(r=>r!=='equity').map(r=>rank[r]));
  if(model.allocation.some(x=>{const r=productById(x.assetId)!.role;return r!=='equity'&&rank[r]>maxDefensive;}))reasons.push('Los bonos tienen más duración que la admitida en la propuesta.');
@@ -46,10 +48,10 @@ export function applyFundModel(model:FundModel,original:PortfolioProposal,horizo
  const positions=products.map((p,i)=>({assetId:p.id,name:p.name,isin:p.isin,role:p.role,weight:amounts[i]!/original.amount*100,amount:amounts[i]!,monthly:monthly[i]!,fee:p.fee,source:p.source})).filter(p=>p.amount>0);
  const feePct=positions.reduce((s,p)=>s+p.weight*p.fee/100,0);
  const cov=modelCovariance(roles).map((row,i)=>row.map((v,j)=>roles[i]===roles[j]?ROLE_MODEL[roles[i]!].vol**2:v));
- const access=original.settings.fundAccessConfirmed;
- return validatePortfolioProposal({...original,kind:access?original.kind:'objective',fundedToday:access?original.fundedToday:0,settings:{...original.settings,priority:'funds'},positions,
+ const access=original.settings.fundAccessConfirmed,study=original.settings.fundAccessMode==='study';
+ return validatePortfolioProposal({...original,kind:access||study?original.kind:'objective',fundedToday:access||study?original.fundedToday:0,settings:{...original.settings,priority:'funds'},positions,modelAssignment:{id:model.id,name:model.name,revision:'revision' in model?Number(model.revision):1,method:'manual'},
   equity:positions.filter(p=>p.role==='equity').reduce((s,p)=>s+p.weight,0),stressLoss:Math.round(positions.reduce((s,p)=>s+p.amount*ROLE_MODEL[p.role].shock/100,0)*100)/100,feePct,feeAnnual:Math.round(original.amount*feePct)/100,
   optimization:{modelVersion:MODEL_VERSION,ids:products.map(p=>p.id),roles,means:products.map(p=>ROLE_MODEL[p.role].mean-p.fee),cov,riskFree:original.optimization?.riskFree??2.2,equityCap:cap,lossLimit:loss,goal:original.optimization?.goal??'sharpe',basis:'assumptions',candidateCount:1,step:5},
-  reasons:[...original.reasons.filter(s=>!s.startsWith('Objetivo:')&&!s.startsWith('Parte de empresas resultante:')&&!s.startsWith('Se optimiza')&&!s.startsWith('Optimización de planificación')).slice(-32),`Modelo elegido por el asesor: ${model.name}. Conserva los límites de la entrevista. Elegir una plantilla no es maximizar Sharpe.`, 'Las exposiciones son objetivos por mandato del fondo, no su desglose diario interno.'],
-  conditions:[...original.conditions.filter(s=>!s.includes('no incorpora emergentes')&&!s.startsWith('Para «')).slice(-34),'Confirmar acceso a cada clase, mínimos y KID vigente con el comercializador. El mínimo directo puede diferir del de una plataforma.',...(!access?['Cartera objetivo: acceso a estas clases todavía sin confirmar.']:[])]});
+  reasons:[...original.reasons.filter(s=>!original.positions.some(p=>s.startsWith(p.isin+': '))&&!s.startsWith('Objetivo:')&&!s.startsWith('Parte de empresas resultante:')&&!s.startsWith('Se optimiza')&&!s.startsWith('Optimización de planificación')&&!s.startsWith('Tu límite previo')).slice(-32),`Modelo elegido por el asesor: ${model.name}. Conserva los límites de la entrevista. Elegir una plantilla no es maximizar Sharpe.`, 'Las exposiciones son objetivos por mandato del fondo, no su desglose diario interno.',...(original.client?[original.client.name+': '+positions.filter(p=>p.role==='equity').reduce((sum,p)=>sum+p.weight,0).toFixed(2)+' % en renta variable con el modelo '+model.name+'; límite de la entrevista '+cap.toFixed(2)+' %.']:[])],
+  conditions:[...original.conditions.filter(s=>!s.includes('no incorpora emergentes')&&!s.startsWith('Clase propuesta para estudio:')&&!s.startsWith('Para «')).slice(-34),'Confirmar acceso a cada clase, mínimos y KID vigente con el comercializador. El mínimo directo puede diferir del de una plataforma.',...(!access?[study?'Borrador de estudio: acceso y mínimos de las clases pendientes de verificar.':'Cartera objetivo: acceso a estas clases todavía sin confirmar.']:[])]});
 }

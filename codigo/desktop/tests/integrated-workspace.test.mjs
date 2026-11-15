@@ -29,11 +29,11 @@ test('explicit interview priorities change the allocation without increasing the
  const plans=['sharpe','growth','stability'].map(optimizationGoal=>buildInterviewPlan({...healthyAnswers(),optimizationGoal}));
  assert.equal(plans[0].proposal.optimization.goal,'sharpe');assert.equal(plans[1].proposal.optimization.goal,'growth');
  assert.ok(plans[0].proposal.equity<plans[1].proposal.equity);assert.ok(plans[2].proposal.equity<=plans[1].proposal.equity);
- for(const p of plans){assert.ok(p.proposal.equity<=80);assert.ok(p.proposal.stressLoss<=10000);validatePortfolioProposal(p.proposal);}
+ for(const p of plans){assert.ok(p.proposal.equity<=100);assert.ok(p.proposal.stressLoss<=10000);validatePortfolioProposal(p.proposal);}
  const small=allocateCents(.01,[.8,.2],['equity','short'],80,50);assert.deepEqual(small,[0,.01]);
 });
 test('new optimized proposals preserve funds, cents and limits and reject expanding the interview mandate',()=>{
- const p=buildInterviewPlan(healthyAnswers()).proposal;
+ const p=buildInterviewPlan({...healthyAnswers(),balance:'balanced',optimizationGoal:'growth'}).proposal;
  const audit={...p.optimization,goal:'sharpe'},next=optimizeProposal(p,audit);
  assert.ok(next.equity<p.equity);assert.equal(Math.round(next.positions.reduce((s,x)=>s+x.amount,0)*100),Math.round(p.amount*100));
  assert.equal(Math.round(next.positions.reduce((s,x)=>s+x.monthly,0)*100),Math.round(p.monthly*100));

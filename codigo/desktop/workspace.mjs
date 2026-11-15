@@ -1,5 +1,6 @@
 import { validateTracking,validateWealthHistory } from '../desktop-runtime/portfolio-monitor.mjs';
 import { validateAllocationAudit } from '../desktop-runtime/allocation-engine.mjs';
+import { validateOptimizationStudy } from '../desktop-runtime/optimization.mjs';
 import { validatePortfolioProposal,assertProposalHoldings } from '../desktop-runtime/portfolio-proposal.mjs';
 import { mkdir, readFile, writeFile, rename, copyFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +8,8 @@ import { validateInterviews } from '../desktop-runtime/risk-profile.mjs';
 import { validateHistory } from '../desktop-runtime/professional-analysis.mjs';
 import { validateAdviser, validateReportPreferences } from '../desktop-runtime/adviser.mjs';
 import { migrateLegacy } from '../desktop-runtime/people.mjs';
+import {validateAccountModels} from '../desktop-runtime/account-models.mjs';
+import {ROLE_LABELS} from '../desktop-runtime/investment-products.mjs';
 
 export const MAX_WORKSPACE_BYTES = 5 * 1024 * 1024;
 const num = (v, name, min = 0, max = 1e12) => {
@@ -17,6 +20,10 @@ const str = (v, name, max = 180, empty = false) => {
   if (typeof v !== 'string' || (!empty && !v.trim()) || v.length > max) throw new Error('Texto no válido: ' + name);
   return v;
 };
+function validatePlanningRole(value){
+  if(typeof value!=='string'||!Object.hasOwn(ROLE_LABELS,value))throw new Error('Bloque de planificación no válido');
+  return value;
+}
 function validateDossier(value) {
   if (!Array.isArray(value.portfolios) || value.portfolios.length < 1 || value.portfolios.length > 250) throw new Error('Número de carteras no válido');
   const ids = new Set();
@@ -31,12 +38,16 @@ function validateDossier(value) {
     if(proposal&&tracking)throw new Error('Una propuesta no puede tener valoraciones de cuenta');
     if(tracking&&Math.abs(p.holdings.reduce((s,h)=>s+h.amount,0)-tracking.valuations.at(-1).value)>.02)throw new Error('La valoración no coincide con el saldo de posiciones');
     const mandate=p.mandate===undefined?undefined:validateAllocationAudit(p.mandate);
+    const optimizationStudy=p.optimizationStudy===undefined?undefined:validateOptimizationStudy(p.optimizationStudy);
+    const modelStudy=p.modelStudy===undefined?undefined:{id:str(p.modelStudy.id,'modelo',160),name:str(p.modelStudy.name,'nombre de modelo',120),reasons:p.modelStudy.reasons};
+    if(modelStudy&&(!Array.isArray(modelStudy.reasons)||modelStudy.reasons.length>20||modelStudy.reasons.some(s=>typeof s!=='string'||s.length>2000)))throw new Error('Condiciones de estudio del modelo no válidas');
     return {
       id, name: str(p.name, 'nombre', 120), createdAt: num(p.createdAt, 'fecha', 0, Number.MAX_SAFE_INTEGER),
       ...(p.origin !== undefined ? { origin: str(p.origin, 'origen', 160, true) } : {}),
-      ...(proposal?{proposal}:{}),...(tracking?{tracking}:{}),...(p.mode==='draft'?{mode:'draft'}:{}),...(mandate?{mandate}:{}),
+      ...(proposal?{proposal}:{}),...(tracking?{tracking}:{}),...(p.mode==='draft'?{mode:'draft'}:{}),...(mandate?{mandate}:{}),...(modelStudy?{modelStudy}:{}),...(optimizationStudy?{optimizationStudy}:{}),
       holdings: p.holdings.map(h => ({
         assetId: str(h.assetId, 'activo', 160), amount: num(h.amount, 'importe'),
+        ...(h.planningRole!==undefined?{planningRole:validatePlanningRole(h.planningRole)}:{}),
         ...(h.meta ? { meta: {
           symbol: str(h.meta.symbol, 'símbolo', 64), name: str(h.meta.name, 'activo', 180),
           kind: str(h.meta.kind, 'tipo', 80), currency: str(h.meta.currency, 'divisa', 8, true),
@@ -91,7 +102,8 @@ export function validateWorkspace(value) {
   if(activePersonId!==null && !people.some(p=>p.id===activePersonId&&!p.archived))throw new Error('La persona activa no existe o está archivada');
   const modules=value.selectedModules??[];
   if(!Array.isArray(modules)||modules.some(n=>!Number.isInteger(n)||n<1||n>28))throw new Error('Selección no válida');
-  return {version:2,people,activePersonId,selectedModules:[...new Set(modules)],...(value.adviser!==undefined?{adviser:validateAdviser(value.adviser)}:{})};
+  if(value.modelLibraryRevision!==undefined&&(!Number.isSafeInteger(value.modelLibraryRevision)||value.modelLibraryRevision<0))throw new Error('Revisión de biblioteca no válida');
+  return {version:2,people,activePersonId,selectedModules:[...new Set(modules)],...(value.adviser!==undefined?{adviser:validateAdviser(value.adviser)}:{}),...(value.modelPortfolios!==undefined?{modelPortfolios:validateAccountModels(value.modelPortfolios)}:{}),...(value.modelLibraryRevision!==undefined?{modelLibraryRevision:value.modelLibraryRevision}:{})};
 }
 
 // One queue, atomic replacement, previous valid version kept beside the current file.

@@ -53,3 +53,9 @@ dist-desktop/
 desktop-runtime/
 release/
 .test-tmp/
+
+# Private billing storage and local validation output
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+qa/

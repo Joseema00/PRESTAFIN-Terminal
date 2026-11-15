@@ -1,4 +1,6 @@
-// This edition is the owner's local workspace, not a simulated cloud session.
+import { useContext } from 'react';
+import { BillingContext } from './billing';
 export function useAuth() {
-  return {session:null,user:null as {email?:string;user_metadata?:Record<string,unknown>}|null,loading:false,isAuthenticated:false};
+  const context=useContext(BillingContext),user=context?.state?.user??null;
+  return {session:null,user,loading:context?.loading??false,isAuthenticated:!!user};
 }

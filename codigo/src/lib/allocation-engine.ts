@@ -9,7 +9,7 @@ export const ROLE_MODEL:Record<ProductRole,{mean:number;vol:number;shock:number}
 };
 export type AllocationInput={ids:string[];roles:ProductRole[];means:number[];cov:number[][];riskFree:number;equityCap:number;lossLimit:number;goal:AllocationGoal};
 export type AllocationPoint={weights:number[];mean:number;vol:number;sharpe:number|null;stress:number};
-export type AllocationAudit={modelVersion:string;goal:AllocationGoal;basis:'assumptions'|'history';source?:string;dataEnd?:string;observations?:number;riskFree:number;equityCap:number;lossLimit:number;ids:string[];roles:ProductRole[];means:number[];cov:number[][];candidateCount:number;step:number};
+export type AllocationAudit={construction?:'continuous';modelVersion:string;goal:AllocationGoal;basis:'assumptions'|'history';source?:string;dataEnd?:string;observations?:number;riskFree:number;equityCap:number;lossLimit:number;ids:string[];roles:ProductRole[];means:number[];cov:number[][];candidateCount:number;step:number};
 export function inferGoal(a:Record<string,unknown>):AllocationGoal{
  if(['sharpe','growth','stability'].includes(String(a['optimizationGoal'])))return a['optimizationGoal'] as AllocationGoal;
  if(a['guarantee']==='required'||a['balance']==='stable'||a['tradeoff']==='peace')return 'stability';
@@ -42,7 +42,7 @@ export function allocationPoint(input:Pick<AllocationInput,'means'|'cov'|'roles'
 }
 export function validAllocationInput(x:AllocationInput):void{
  const n=x.ids.length;
- if(!n||n>4||new Set(x.ids).size!==n||x.roles.length!==n||x.means.length!==n||x.cov.length!==n||x.roles.some(r=>!ROLE_MODEL[r])||x.means.some(v=>!Number.isFinite(v)||v<-99||v>100)||!Number.isFinite(x.riskFree)||x.riskFree<-20||x.riskFree>30||!Number.isFinite(x.equityCap)||x.equityCap<0||x.equityCap>100||!Number.isFinite(x.lossLimit)||x.lossLimit<0||x.lossLimit>100||!GOAL_LABELS[x.goal])throw new Error('Datos de optimización no válidos');
+ if(!n||n>10||new Set(x.ids).size!==n||x.roles.length!==n||x.means.length!==n||x.cov.length!==n||x.roles.some(r=>!ROLE_MODEL[r])||x.means.some(v=>!Number.isFinite(v)||v<-99||v>100)||!Number.isFinite(x.riskFree)||x.riskFree<-20||x.riskFree>30||!Number.isFinite(x.equityCap)||x.equityCap<0||x.equityCap>100||!Number.isFinite(x.lossLimit)||x.lossLimit<0||x.lossLimit>100||!GOAL_LABELS[x.goal])throw new Error('Datos de optimización no válidos');
  if(x.cov.some((row,i)=>row.length!==n||row.some((v,j)=>!Number.isFinite(v)||Math.abs(v-x.cov[j]?.[i]!)>1e-7)||row[i]!<0))throw new Error('Covarianza no válida');
  // Cholesky with small tolerance; rejects indefinite covariance supplied in backups.
  const L=Array.from({length:n},()=>Array(n).fill(0) as number[]);
@@ -55,6 +55,7 @@ export function validAllocationInput(x:AllocationInput):void{
 /** Exhaustive long-only grid, no random lottery, leverage or short positions. */
 export function optimizeAllocation(input:AllocationInput,step=5){
  validAllocationInput(input);
+ if(input.ids.length>4)throw new Error('La búsqueda exhaustiva permite hasta cuatro productos; la asignación de un modelo conserva su composición completa.');
  if(!Number.isInteger(step)||step<1||100%step!==0)throw new Error('Paso no válido');
  const candidates:AllocationPoint[]=[];const n=input.ids.length;
  function visit(weights:number[],left:number){
@@ -71,8 +72,8 @@ export function optimizeAllocation(input:AllocationInput,step=5){
 }
 export function validateAllocationAudit(raw:unknown):AllocationAudit{
  const x=raw as AllocationAudit;
- if(!x||x.modelVersion!==MODEL_VERSION||!['assumptions','history'].includes(x.basis)||!Array.isArray(x.ids)||x.ids.some(id=>typeof id!=='string'||id.length>160)||!Array.isArray(x.roles)||!Array.isArray(x.means)||!Array.isArray(x.cov)||!Number.isInteger(x.candidateCount)||x.candidateCount<1||x.candidateCount>20000||x.step!==5)throw new Error('Registro de optimización no válido');
+ if(!x||x.modelVersion!==MODEL_VERSION||!['assumptions','history'].includes(x.basis)||!Array.isArray(x.ids)||x.ids.some(id=>typeof id!=='string'||id.length>160)||!Array.isArray(x.roles)||!Array.isArray(x.means)||!Array.isArray(x.cov)||!Number.isInteger(x.candidateCount)||x.candidateCount<1||x.candidateCount>20000||(x.construction==='continuous'?x.step!==0:x.step!==5)||x.construction!==undefined&&x.construction!=='continuous')throw new Error('Registro de optimización no válido');
  if(x.basis==='history'&&(typeof x.source!=='string'||!x.source||x.source.length>300||typeof x.dataEnd!=='string'||!/^\d{4}-\d{2}$/.test(x.dataEnd)||!Number.isInteger(x.observations)||x.observations!<24||x.observations!>1200))throw new Error('Fuente de optimización no válida');
  validAllocationInput(x);
- return {modelVersion:x.modelVersion,goal:x.goal,basis:x.basis,...(x.basis==='history'?{source:x.source!,dataEnd:x.dataEnd!,observations:x.observations!}:{}),riskFree:x.riskFree,equityCap:x.equityCap,lossLimit:x.lossLimit,ids:[...x.ids],roles:[...x.roles],means:[...x.means],cov:x.cov.map(r=>[...r]),candidateCount:x.candidateCount,step:x.step};
+ return {...(x.construction?{construction:x.construction}:{}),modelVersion:x.modelVersion,goal:x.goal,basis:x.basis,...(x.basis==='history'?{source:x.source!,dataEnd:x.dataEnd!,observations:x.observations!}:{}),riskFree:x.riskFree,equityCap:x.equityCap,lossLimit:x.lossLimit,ids:[...x.ids],roles:[...x.roles],means:[...x.means],cov:x.cov.map(r=>[...r]),candidateCount:x.candidateCount,step:x.step};
 }

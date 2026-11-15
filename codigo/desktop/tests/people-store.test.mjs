@@ -12,7 +12,7 @@ const store=await import('../../desktop-ui/use-portfolios.ts');
 let saved=null,imported=null;
 globalThis.window={prestafin:{loadWorkspace:async()=>saved,saveWorkspace:async value=>{saved=validateWorkspace(structuredClone(value));return {savedAt:Date.now()};},importWorkspace:async()=>imported,exportWorkspace:async()=>true}};
 await store.initializeWorkspace();
-function read(){let result;function Capture(){result={people:store.usePeople(),portfolios:store.usePortfolios(),interviews:store.useInterviews()};return null;}renderToString(createElement(Capture));return result;}
+function read(){let result;function Capture(){result={people:store.usePeople(),portfolios:store.usePortfolios(),interviews:store.useInterviews(),models:store.useModelLibrary()};return null;}renderToString(createElement(Capture));return result;}
 async function reset(){imported={version:2,people:[],activePersonId:null,selectedModules:[]};await store.restoreWorkspace();}
 
 test('renderer store keeps loans, holdings, interviews and simulations isolated when switching people',async()=>{
@@ -55,6 +55,17 @@ test('generated interview portfolios remain with their person and repeated gener
   await read().portfolios.saveNow();assert.equal(saved.people.find(p=>p.id===owner).portfolios.length,2);
 });
 
+test('portfolio removal clears its generated link and preserves the questionnaire and other persons data',async()=>{
+ const {healthyAnswers}=await import('./fixtures/interview.mjs');const {newPerson,emptyWorkspace}=await import('../../desktop-runtime/people.mjs');
+ const p=newPerson('Eliminar propuesta sintética'),other=newPerson('No modificar'),now=Date.now();
+ p.interviews=[{id:'delete-linked-interview',alias:'Respuestas conservadas',createdAt:now,updatedAt:now,step:6,revision:1,rulesVersion:1,answers:healthyAnswers()}];p.activeInterviewId=p.interviews[0].id;
+ imported={...emptyWorkspace(),people:[p,other],activePersonId:p.id};await store.restoreWorkspace();
+ const id=read().interviews.generate(p.activeInterviewId);const answers=structuredClone(read().interviews.active.answers);
+ const oldCallbacks=read().portfolios;read().portfolios.remove(id);await read().portfolios.saveNow();
+ assert.equal(read().interviews.active.generated,undefined);assert.deepEqual(read().interviews.active.answers,answers);assert.ok(!read().portfolios.portfolios.some(c=>c.id===id));assert.deepEqual(saved.people[1],other);
+ read().people.select(other.id);const previous=structuredClone(read().portfolios.active);oldCallbacks.remove(previous.id);assert.deepEqual(read().portfolios.active,previous);
+});
+
 test('old plan version regenerates with saved answers and keeps both audit versions',async()=>{
  const {healthyAnswers}=await import('./fixtures/interview.mjs');
  const {newPerson,emptyWorkspace}=await import('../../desktop-runtime/people.mjs');
@@ -63,11 +74,22 @@ test('old plan version regenerates with saved answers and keeps both audit versi
  p.interviews=[{id:'migration-interview',alias:'Entrevista',createdAt:now,updatedAt:now,step:6,revision:35,rulesVersion:1,answers:{...healthyAnswers(),savings:6000},generated:{portfolioId:oldId,revision:35,createdAt:now,kind:'planning',planVersion:2}}];p.activeInterviewId='migration-interview';
  imported={...emptyWorkspace(),people:[p],activePersonId:p.id};await store.restoreWorkspace();
  const id=read().interviews.generate('migration-interview');assert.notEqual(id,oldId);assert.equal(read().portfolios.portfolios.length,2);
- assert.equal(read().interviews.active.generated.planVersion,4);assert.equal(read().portfolios.active.proposal.kind,'objective');
+ assert.equal(read().interviews.active.generated.planVersion,10);assert.equal(read().portfolios.active.proposal.kind,'objective');
  assert.equal(read().interviews.generate('migration-interview'),id);await read().portfolios.saveNow();
  const before=structuredClone(saved);imported=before;await store.restoreWorkspace();assert.deepEqual(read().portfolios.active.proposal,before.people[0].portfolios.at(-1).proposal);
  assert.equal(read().interviews.active.answers.initial,20000);assert.equal(read().interviews.active.answers.savings,6000);
  read().interviews.configure('migration-interview',{priority:'coverage',variant:'base',excluded:[],fundAccessConfirmed:false});
  const next=read().interviews.generate('migration-interview');assert.notEqual(next,id);assert.equal(read().portfolios.portfolios.length,3);
- assert.ok(read().portfolios.active.proposal.positions.some(x=>x.isin==='IE00B3YLTY66'));
+  assert.ok(read().portfolios.active.proposal.modelAssignment);const {productById}=await import('../../desktop-runtime/investment-products.mjs');assert.ok(read().portfolios.active.proposal.positions.every(x=>productById(x.assetId)?.vehicle==='Fondo'));
+});
+
+test('private models survive reopening; changes invalidate assignment caches and retain old portfolio snapshots',async()=>{
+ const {healthyAnswers}=await import('./fixtures/interview.mjs');await reset();read().people.create('Cliente de modelo');const id=read().interviews.create();
+ for(const [key,value]of Object.entries(healthyAnswers()))read().interviews.answer(id,key,value);
+ const model={id:'user-model-owned',name:'Mi modelo privado',description:'Composición de prueba',minYears:0,allocation:[{assetId:'fund-amundi-money',pct:100}],revision:1,createdAt:1,updatedAt:1};
+ read().models.save(model);await read().models.saveNow();assert.equal(saved.modelPortfolios.length,1);assert.equal(saved.modelLibraryRevision,1);
+ const original=read().interviews.generate(id),snapshot=structuredClone(read().portfolios.active);assert.equal(read().interviews.generate(id),original);
+ read().models.save({...model,name:'Versión nueva'});const updated=read().interviews.generate(id);assert.notEqual(updated,original);assert.equal(read().models.ownModels[0].revision,2);assert.deepEqual(read().portfolios.portfolios.find(p=>p.id===original),snapshot);
+ await read().models.saveNow();imported=structuredClone(saved);await store.restoreWorkspace();assert.equal(read().models.ownModels[0].name,'Versión nueva');
+ read().models.remove(model.id);await read().models.saveNow();assert.equal(saved.modelPortfolios.length,0);assert.deepEqual(read().portfolios.portfolios.find(p=>p.id===original),snapshot);
 });

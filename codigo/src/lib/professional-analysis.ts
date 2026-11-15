@@ -1,8 +1,12 @@
-export type HistoricalData={portfolioId:string;source:string;importedAt:number;currency:'EUR';columns:string[];rows:{month:string;returns:number[]}[]};
+import type {Holding} from './portfolio';
+export type HistoricalData={portfolioId:string;source:string;importedAt:number;currency:'EUR';columns:string[];holdingKeys?:Record<string,string>;rows:{month:string;returns:number[]}[]};
+/** Persist the instrument metadata used for a download, independently of its label or amount. */
+export const holdingHistoryKey=(h:Holding)=>JSON.stringify([h.assetId,h.meta?.symbol??'',h.meta?.isin??'',h.meta?.kind??'']);
 const mean=(x:number[])=>x.reduce((s,v)=>s+v,0)/x.length;
 export function validateHistory(input:unknown):HistoricalData {
   const d=input as HistoricalData;
   if(!d||typeof d.portfolioId!=='string'||d.portfolioId.length>160||typeof d.source!=='string'||!d.source.trim()||d.source.length>300||d.currency!=='EUR'||!Number.isSafeInteger(d.importedAt)||d.importedAt<0||!Array.isArray(d.columns)||!d.columns.length||d.columns.length>40||d.columns.some(x=>typeof x!=='string'||!x.trim()||x.length>160)||new Set(d.columns).size!==d.columns.length||!Array.isArray(d.rows)||d.rows.length<24||d.rows.length>1200)throw new Error('Histórico no válido: se necesitan 24–1.200 meses y entre 1 y 40 posiciones distintas.');
+  if(d.holdingKeys!==undefined&&(!d.holdingKeys||typeof d.holdingKeys!=='object'||Array.isArray(d.holdingKeys)||Object.keys(d.holdingKeys).length>40||d.columns.some(id=>typeof d.holdingKeys![id]!=='string'||!d.holdingKeys![id]||d.holdingKeys![id]!.length>1024)))throw new Error('Identidad de los productos del histórico no válida.');
   let previous=-1;
   const rows=d.rows.map(r=>{
     if(!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.month)||!Array.isArray(r.returns)||r.returns.length!==d.columns.length||r.returns.some(x=>!Number.isFinite(x)||x<=-1||x>10))throw new Error('Mes o rentabilidad no válidos. Usa meses AAAA-MM y variaciones mayores de -100 %.');
@@ -11,7 +15,7 @@ export function validateHistory(input:unknown):HistoricalData {
     previous=month;return {month:r.month,returns:[...r.returns]};
   });
   if(rows.at(-1)!.month>=new Date(d.importedAt).toISOString().slice(0,7))throw new Error('Utiliza meses cerrados anteriores a la fecha de importación.');
-  return {portfolioId:d.portfolioId,source:d.source.trim(),importedAt:d.importedAt,currency:'EUR',columns:[...d.columns],rows};
+  return {portfolioId:d.portfolioId,source:d.source.trim(),importedAt:d.importedAt,currency:'EUR',columns:[...d.columns],...(d.holdingKeys?{holdingKeys:Object.fromEntries(d.columns.map(id=>[id,d.holdingKeys![id]!]))}:{}),rows};
 }
 export function parseHistoryCSV(csv:string,portfolioId:string,source:string,now=Date.now()):HistoricalData {
   if(csv.length>1500000)throw new Error('El CSV supera el tamaño permitido.');
@@ -57,9 +61,11 @@ export function riskContributions(cov:number[][],weights:number[]){
   const variance=weights.reduce((s,w,i)=>s+w*marginal[i]!,0);
   return {volatility:Math.sqrt(Math.max(0,variance)*12),shares:weights.map((w,i)=>variance>1e-18?w*marginal[i]!/variance:0)};
 }
-export function analyseHistory(data:HistoricalData,holdings:{assetId:string;amount:number}[],method:'sample'|'shrinkage'|'gerber'='sample'){
+export function analyseHistory(data:HistoricalData,holdings:Holding[],method:'sample'|'shrinkage'|'gerber'='sample'){
   if(holdings.some(h=>h.assetId==='interview-cash-pending'))throw new Error('Primero asigna o retira el dinero pendiente: no tiene un histórico de inversión.');
   const d=validateHistory(data),positive=holdings.filter(h=>h.amount>0);
+  if(!d.holdingKeys&&d.source.includes('descarga integrada')&&positive.some(h=>h.meta?.kind.toLowerCase().includes('fondo')))throw new Error('El histórico anterior no conserva la identidad de la clase de estos fondos. Actualiza el mercado para verificarla; los datos guardados se conservan.');
+  if(d.holdingKeys&&positive.some(h=>d.holdingKeys![h.assetId]!==holdingHistoryKey(h)))throw new Error('La clase o el identificador de un producto cambió. Actualiza su histórico; no se utiliza la serie de otra clase.');
   if(positive.some(h=>!Number.isFinite(h.amount))||new Set(positive.map(h=>h.assetId)).size!==positive.length||positive.length!==d.columns.length||positive.some(h=>!d.columns.includes(h.assetId)))throw new Error('El histórico debe cubrir exactamente todas las posiciones con importe positivo de esta cartera.');
   const total=positive.reduce((s,h)=>s+h.amount,0);
   if(!(total>0))throw new Error('La cartera necesita capital positivo.');

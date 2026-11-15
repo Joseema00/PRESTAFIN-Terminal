@@ -36,6 +36,7 @@
     "happy-dom": "^21.0.3",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.575.0",
+    "quadprog": "2.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "recharts": "^2.15.4",
@@ -46,7 +47,7 @@
     "typescript": "^5.8.3",
     "vite": "^8.1.5"
   },
-  "version": "0.7.0",
+  "version": "0.26.0",
   "description": "Terminal de escritorio de Prestafin",
   "author": "Prestafin",
   "main": "desktop/main.mjs",
@@ -64,6 +65,7 @@
     "files": [
       "desktop/*.mjs",
       "desktop/*.cjs",
+      "desktop/billing-config.json",
       "desktop/icon.ico",
       "desktop-runtime/**/*",
       "dist-desktop/**/*",

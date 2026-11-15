@@ -1,0 +1,97 @@
+name: Build and publish verified Windows release
+on:
+  push:
+    branches: [main]
+    paths: [release.json, .github/workflows/windows-release.yml]
+permissions:
+  contents: write
+concurrency:
+  group: prestafin-windows-release
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Read immutable source reference
+        id: manifest
+        shell: pwsh
+        run: |
+          $releaseData = Get-Content release.json -Raw | ConvertFrom-Json
+          if ($releaseData.sourceSha -notmatch '^[a-f0-9]{40}$' -or $releaseData.version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid source manifest' }
+          "sha=$($releaseData.sourceSha)" >> $env:GITHUB_OUTPUT
+          "version=$($releaseData.version)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Joseema00/PRESTAFIN-Terminal
+          ref: ${{ steps.manifest.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: source/codigo/package-lock.json
+      - name: Install locked dependencies
+        working-directory: source/codigo
+        run: npm ci
+      - name: Tests
+        working-directory: source/codigo
+        run: npm run desktop:check
+      - name: Type checks
+        working-directory: source/codigo
+        run: npm run desktop:typecheck
+      - name: Compile
+        working-directory: source/codigo
+        run: npm run desktop:build
+      - name: Build Windows installer
+        working-directory: source/codigo
+        run: node node_modules/electron-builder/cli.js --win nsis --x64 --publish never --config.nsis.artifactName=Prestafin.Terminal.exe
+      - name: Inspect actual distribution
+        working-directory: source/codigo
+        run: node scripts/verify-distribution.mjs
+      - name: Open packaged application with an empty isolated profile
+        working-directory: source/codigo
+        shell: pwsh
+        run: |
+          $smokeProcess = Start-Process -FilePath (Resolve-Path node_modules/electron/dist/electron.exe).Path -ArgumentList @('scripts/smoke-installed.cjs') -WindowStyle Hidden -PassThru -Wait -RedirectStandardOutput qa/native-smoke.log -RedirectStandardError qa/native-smoke-error.log
+          if ($smokeProcess.ExitCode -ne 0) { Get-Content qa/native-smoke-error.log; exit $smokeProcess.ExitCode }
+      - name: Publish only after all checks pass
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs = require('node:fs');
+            const crypto = require('node:crypto');
+            const m = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+            const v = JSON.parse(fs.readFileSync('source/codigo/release/validation.json', 'utf8'));
+            const smoke = JSON.parse(fs.readFileSync('source/codigo/qa/installed-smoke/result.json', 'utf8'));
+            if (v.version !== m.version || smoke.version !== m.version || !smoke.loginScreen || smoke.archiveSha256 !== v.archiveSha256) throw Error('Distribution and native smoke do not match');
+            const {owner, repo} = context.repo;
+            const tag = 'v' + m.version;
+            let release;
+            try { release = (await github.rest.repos.getReleaseByTag({owner,repo,tag})).data; }
+            catch(e) { if(e.status !== 404) throw e; }
+            if(release && !release.draft) throw Error('A published release must not be overwritten');
+            const body = [
+              'Instalador completo de PRESTAFIN-TERMINAL ' + m.version + ' para Windows x64.',
+              'PRESTAFIN30: 30 días Pro sin tarjeta, una sola vez por cuenta, con caducidad visible. Nuevos pagos sin prueba automática de 14 días.',
+              'Incluye la corrección de históricos por clase y diagnóstico individual de cobertura, junto con las funciones de 0.25.',
+              'Pruebas automatizadas, tipos, compilación, inspección del paquete y apertura nativa con perfil vacío completadas. Las comprobaciones reales del canje se documentan en el código fuente.',
+              'Los cobros Stripe requieren completar la configuración fiscal del titular. La promoción no crea tarjetas ni cargos.',
+              'Instalador sin firma digital de editor. Sin cuentas, sesiones, entrevistas ni carteras personales del equipo de desarrollo.',
+              'Fuente: https://github.com/Joseema00/PRESTAFIN-Terminal/commit/' + m.sourceSha,
+              'SHA-256: ' + v.sha256
+            ].join('\n\n');
+            if(!release) release = (await github.rest.repos.createRelease({owner,repo,tag_name:tag,target_commitish:context.sha,name:'Prestafin Terminal '+tag,body,draft:true,prerelease:false})).data;
+            for(const name of ['Prestafin.Terminal.exe','SHA256SUMS.txt','validation.json']) {
+              const existing = release.assets.find(a=>a.name===name);
+              if(existing) await github.rest.repos.deleteReleaseAsset({owner,repo,asset_id:existing.id});
+              const data = fs.readFileSync('source/codigo/release/'+name);
+              await github.rest.repos.uploadReleaseAsset({owner,repo,release_id:release.id,name,data,headers:{'content-type':'application/octet-stream','content-length':data.length}});
+            }
+            const asset = (await github.rest.repos.listReleaseAssets({owner,repo,release_id:release.id})).data.find(a=>a.name==='Prestafin.Terminal.exe');
+            if(!asset || asset.size!==v.bytes || (asset.digest && asset.digest!=='sha256:'+v.sha256)) throw Error('Uploaded installer verification failed');
+            await github.rest.repos.updateRelease({owner,repo,release_id:release.id,body,draft:false,prerelease:false,make_latest:'true'});

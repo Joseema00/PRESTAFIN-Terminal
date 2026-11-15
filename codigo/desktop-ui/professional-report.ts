@@ -1,18 +1,23 @@
 import { personWealth,accountSeries } from '../src/lib/portfolio-monitor';
 import { GOAL_LABELS } from '../src/lib/allocation-engine';
+import {METHODS,validateOptimizationStudy} from '../src/lib/optimization';
 import { jsPDF } from 'jspdf';
 import type { Person } from '../src/lib/people';
 import type { AdviserSettings,ReportPreferences,ReportSection } from '../src/lib/adviser';
 import { assessInterview,isInterviewReviewed,QUESTIONS,questionTitle,budgetIsKnown } from '../src/lib/risk-profile';
 import { analyseHistory,costProjection } from '../src/lib/professional-analysis';
+import { validateReportPreferences } from '../src/lib/adviser';
+import { enrichReport } from './report-insights';
+import { reportGraphic,drawReportGraphic,type ReportChart } from './report-graphics';
 import { monthlyPayment } from '../src/lib/finance';
 
 export const SECTION_LABELS:Record<ReportSection,string>={summary:'Resumen personal',interview:'Entrevista y revisión',budget:'Capacidad y reservas',portfolio:'Composición de la cartera',risk:'Riesgo e históricos',costs:'Costes y poder adquisitivo',mortgage:'Préstamo e intereses',actions:'Plan de seguimiento',glossary:'Diccionario y explicaciones'};
-export type ReportBlock={title:string;text:string[];headers?:string[];rows?:string[][]};
-export type ProfessionalReport={id:string;createdAt:number;person:string;reference:string;firm:string;adviser:string;level:string;status:string;blocks:ReportBlock[];footer:string};
+export type ReportBlock={section?:ReportSection;charts?:ReportChart[];title:string;text:string[];headers?:string[];rows?:string[][]};
+export type ProfessionalReport={id:string;createdAt:number;person:string;reference:string;firm:string;adviser:string;level:string;status:string;blocks:ReportBlock[];footer:string;presentation:Pick<ReportPreferences,'title'|'subtitle'|'purpose'|'includeCover'|'includeContents'|'includeTables'|'chartTheme'>};
 const euro=(n:number)=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:2}).format(n);
 const pct=(n:number)=>new Intl.NumberFormat('es-ES',{style:'percent',maximumFractionDigits:2}).format(n);
 export function buildProfessionalReport(person:Person,adviser:AdviserSettings,options:ReportPreferences,names:Record<string,string>={},now=Date.now(),id=crypto.randomUUID()):ProfessionalReport {
+  options=validateReportPreferences(options);
   const portfolio=person.portfolios.find(p=>p.id===person.activeId)!;
   const proposal=portfolio.proposal;
   const pending=portfolio.holdings.filter(h=>h.assetId==='interview-cash-pending').reduce((s,h)=>s+h.amount,0),planning=pending>0;
@@ -21,13 +26,13 @@ export function buildProfessionalReport(person:Person,adviser:AdviserSettings,op
   const interview=proposal&&linkedInterview?.revision!==proposal.revision?undefined:linkedInterview,assessment=interview?assessInterview(interview.answers):null;
   const reviewed=!!interview&&isInterviewReviewed(interview),plain=options.level==='plain',technical=options.level==='technical';
   const blocks:ReportBlock[]=[];
-  const add=(section:ReportSection,text:string[],headers?:string[],rows?:string[][])=>{if(!options.sections.includes(section))return;const existing=blocks.find(b=>b.title===SECTION_LABELS[section]);if(existing){existing.text.push(...text);if(headers)existing.headers=headers;if(rows)existing.rows=rows;}else blocks.push({title:SECTION_LABELS[section],text,...(headers?{headers}:{}),...(rows?{rows}:{})});};
+  const add=(section:ReportSection,text:string[],headers?:string[],rows?:string[][])=>{if(!options.sections.includes(section))return;const existing=blocks.find(b=>b.title===SECTION_LABELS[section]);if(existing){existing.text.push(...text);if(headers)existing.headers=headers;if(rows)existing.rows=rows;}else blocks.push({section,title:SECTION_LABELS[section],text,...(headers?{headers}:{}),...(rows?{rows}:{})});};
   add('summary',[
-    plain?`${person.name}, este documento reúne lo que has contado sobre tu situación y los datos registrados. Sirve para conversar con tu asesor y comprobar qué falta antes de tomar decisiones.`:'Resumen de la situación declarada, la cartera seleccionada y las hipótesis del análisis para apoyar la revisión profesional.',
+    `${person.name}: ${euro(person.profile.cash)} de liquidez, ${euro(person.profile.otherAssets)} en otros activos y ${euro(person.mortgage.principal)} de préstamo registrado.`,
     `Patrimonio neto registrado: ${euro(net)}. Incluye liquidez y otros activos e inversiones con seguimiento, menos el préstamo. Sin cuentas con seguimiento se conserva el saldo manual seleccionado de versiones anteriores. Las propuestas y borradores se excluyen del patrimonio.`,
     `Capital introducido en esa cartera: ${euro(total)}. No es una valoración automática actualizada; fecha de corte del documento: ${new Date(now).toLocaleDateString('es-ES')}.`,
     ...(planning?[`Cartera de planificación: ${euro(pending)} pendientes de asignar, sin producto ni rentabilidad prevista. Este importe se excluye del patrimonio neto calculado para evitar sumarlo otra vez a la liquidez declarada.`]:[]),
-    ...(proposal?[`Propuesta guardada: ${proposal.kind==='objective'?'cartera objetivo condicionada':proposal.kind==='planning'?'plan de protección':'borrador de inversión'}; motor 3, revisión ${proposal.revision}. Capital asignable hoy: ${euro(proposal.fundedToday)}. No se han ejecutado operaciones.`]:[]),
+    ...(proposal?[`Propuesta guardada: ${proposal.kind==='objective'?'cartera objetivo condicionada':proposal.kind==='planning'?'plan de protección':'borrador de inversión'}; revisión ${proposal.revision}. Capital asignable hoy: ${euro(proposal.fundedToday)}. No se han ejecutado operaciones.`]:[]),
     ...(proposal?[]:[assessment?.ready?`Orientación de la entrevista: ${assessment.profile}. ${reviewed?'Existe una revisión del asesor para estas respuestas.':'Pendiente de revisión del asesor para estas respuestas.'}`:'La entrevista está incompleta o presenta puntos que requieren aclaración. No se emite una propuesta personalizada de productos.']),
   ]);
   if(interview&&assessment){
@@ -49,11 +54,30 @@ export function buildProfessionalReport(person:Person,adviser:AdviserSettings,op
   if(proposal)add('portfolio',[
     `Cartera: ${portfolio.name}. ${proposal.kind==='objective'?'Simulación de un objetivo que todavía no se puede financiar.':'Propuesta sin operaciones ejecutadas.'}`,
     ...proposal.reasons,...proposal.conditions,
-    'Los importes son presupuestos en EUR. Faltan cotización, participaciones, redondeos y costes del intermediario. La elección compara un universo de 11 productos; no garantiza ser la mejor de todo el mercado.',
+    ...(proposal.client?[`Contexto de origen de ${proposal.client.name}: liquidez registrada ${euro(proposal.client.cash)}, ahorros de la entrevista ${euro(proposal.client.declaredSavings)}, plazo ${proposal.client.horizon.toLowerCase()}. La propuesta conserva estos datos aunque el patrimonio cambie después.`]:[]),
+    'Los importes son presupuestos en EUR. Faltan cotización, participaciones, redondeos y costes del intermediario. La elección compara el universo de productos documentado por la herramienta; no garantiza ser la mejor de todo el mercado.',
   ],['Producto / ISIN','Importe','Peso','Coste corriente anual'],proposal.positions.map(x=>[x.name+' / '+x.isin,euro(x.amount),pct(x.weight/100),pct(x.fee/100)+' / '+euro(x.amount*x.fee/100)]));
   else add('portfolio',[...(planning?['La posición pendiente es un registro de planificación. No representa una compra, un depósito ni una recomendación de productos.']:[]),`Cartera: ${portfolio.name}. Importes registrados en EUR, con independencia de la divisa de cotización del instrumento.`,`El porcentaje describe el reparto del capital introducido. No comprueba automáticamente el emisor, el riesgo subyacente, los costes del producto ni las restricciones de la persona.`,...(portfolio.origin?['Origen: '+portfolio.origin]:[])],['Posición','Importe registrado','Peso'],portfolio.holdings.map(h=>[h.assetId==='interview-cash-pending'?'Liquidez pendiente de asignar (sin producto)':names[h.assetId]??h.meta?.name??h.assetId,euro(h.amount),total?pct(h.amount/total):'Sin capital']));
-  const audit=proposal?.optimization??portfolio.mandate;
-  if(audit)add('risk',[`Objetivo de optimización: ${GOAL_LABELS[audit.goal]}. Base: ${audit.basis==='history'?'histórico hasta '+audit.dataEnd:'hipótesis de planificación'}. Referencia supuesta: ${audit.riskFree} % anual.`, `Límites: empresas como máximo ${audit.equityCap} % y pérdida del escenario severo hasta ${audit.lossLimit} %. Se evaluaron ${audit.candidateCount} repartos en pasos de ${audit.step} puntos porcentuales. Máximo de la malla evaluada, no un óptimo universal ni una garantía.`,audit.basis==='history'?'Medias mensuales anualizadas y covarianza de la muestra. La optimización retrospectiva puede sobreajustar el periodo.':'Las rentabilidades, volatilidades y correlaciones son supuestos propios del modelo, no observaciones de mercado.']);
+  const audit=portfolio.optimizationStudy?undefined:proposal?.optimization??portfolio.mandate;
+  if(audit)add('risk',[`Objetivo de optimización: ${GOAL_LABELS[audit.goal]}. Base: ${audit.basis==='history'?'histórico hasta '+audit.dataEnd:'hipótesis de planificación'}. Referencia supuesta: ${audit.riskFree} % anual.`, `Límites: empresas como máximo ${audit.equityCap} % y pérdida del escenario severo hasta ${audit.lossLimit} %. ${audit.construction==='continuous'?'Reparto calculado mediante optimización continua.':'Se evaluaron '+audit.candidateCount+' repartos en pasos de '+audit.step+' puntos porcentuales.'} Los resultados dependen de las hipótesis del estudio.`,audit.basis==='history'?'Medias mensuales anualizadas y covarianza de la muestra. La optimización retrospectiva puede sobreajustar el periodo.':'Las rentabilidades, volatilidades y correlaciones son supuestos propios del modelo, no observaciones de mercado.']);
+  if(portfolio.optimizationStudy&&options.sections.includes('risk')){
+    const s=validateOptimizationStudy(portfolio.optimizationStudy),x=s.input,r=s.result,p=r.point;
+    const charts:ReportChart[]=[];
+    if(options.charts.includes('optimizationFrontier'))charts.push({id:'optimizationFrontier',kind:'lines',title:'Frontera eficiente del estudio guardado',caption:'Eje horizontal: volatilidad anual (%). Eje vertical: rentabilidad anual de las entradas (%). Son soluciones bajo los límites de este estudio, no rendimientos futuros.',unit:'%',labels:r.frontier.map(v=>v.vol.toFixed(2)+' %'),x:r.frontier.map(v=>v.vol),series:[{name:'Rentabilidad de la frontera',values:r.frontier.map(v=>v.mean)}]});
+    if(options.charts.includes('optimizationRisk')&&p.vol>0){const risk=x.names.map((name,i)=>({name,value:p.riskShares[i]!*100})).sort((a,b)=>Math.abs(b.value)-Math.abs(a.value)),display=risk.length>10?[...risk.slice(0,9),{name:'Resto de posiciones',value:risk.slice(9).reduce((s,r)=>s+r.value,0)}]:risk;charts.push({id:'optimizationRisk',kind:'bars',title:'Contribución al riesgo de la solución',caption:'Porcentaje de la varianza total con la covarianza guardada; valores negativos indican compensación de riesgo. Si hay más de diez posiciones, se muestran nueve y se suma el resto; el detalle figura en la tabla.',unit:'%',labels:display.map(r=>r.name),series:[{name:'Contribución al riesgo',values:display.map(r=>r.value)}]});}
+    blocks.push({section:'risk',title:'Estudio de construcción y optimización',text:[
+      `Método: ${METHODS[x.method]}. Motor ${s.version}. Ejecución guardada el ${new Date(s.createdAt).toLocaleString('es-ES')}. Se reproducen sus cifras originales sin descargar datos nuevos.`,
+      ...(s.capital!==undefined?[`Capital de referencia del cálculo guardado: ${euro(s.capital)}. No se sustituye por importes modificados después.`]:[]),
+      `Base: ${x.basis==='history'?'estimaciones históricas':'hipótesis de planificación'}. Fuente: ${x.source}. Estimador: ${x.estimator??'Matriz aportada al estudio'}. ${x.basis==='history'?`Ventana ${x.dataStart} a ${x.dataEnd}: ${x.observations} meses.`:''}`,
+      `Rentabilidad anual utilizada: ${pct(p.mean/100)}; volatilidad: ${pct(p.vol/100)}; Sharpe: ${p.sharpe?.toFixed(4)??'no definido'}. Referencia anual supuesta: ${pct(x.riskFree/100)}. Posiciones efectivas: ${p.effectivePositions.toFixed(2)}. Rotación propuesta: ${pct(p.turnover)}.`,
+      `Presupuesto del 100 %, sin cortos ni apalancamiento. Rentabilidad mínima: ${x.targetReturn==null?'sin límite adicional':pct(x.targetReturn/100)}. Volatilidad máxima: ${x.maxVolatility==null?'sin límite adicional':pct(x.maxVolatility/100)}. Rotación máxima: ${x.maxTurnover==null?'sin límite adicional':pct(x.maxTurnover)}. Aversión: ${x.riskAversion}; penalización de concentración: ${x.concentrationPenalty??0} %.`,
+      ...(x.automatic?[`Estimador automático ${x.automatic.version}: ${x.automatic.reason} Ventana de ${x.automatic.trainingMonths} meses; validación temporal de ${x.automatic.validationMonths} meses. ${x.automatic.improvement!==null?'Cambio del error mensual frente a referencia: '+(x.automatic.improvement*100).toFixed(2)+' %.':''} La selección del predictor no demuestra mejora de rentabilidad ni riesgo futuro.`]:[]),
+      ...(x.limits??[]).map(l=>`${l.name}: mínimo ${l.min??'sin límite'}, máximo ${l.max??'sin límite'}.`),
+      `Verificación: ${r.diagnostics.solver}; residuo de factibilidad ${r.diagnostics.primalResidual.toExponential(2)}, estacionariedad ${r.diagnostics.stationarityResidual.toExponential(2)}, complementariedad ${r.diagnostics.complementarityResidual.toExponential(2)}.`,
+      ...r.warnings,...(portfolio.modelStudy?.reasons??[]),
+      'El resultado depende de las estimaciones y restricciones elegidas. Una mayor rentabilidad estimada o un Sharpe superior dentro de muestra no demuestra mejor comportamiento futuro. No se han ejecutado operaciones; las participaciones, el redondeo y los costes externos requieren revisión.',
+    ],headers:['Activo','Peso objetivo','Mínimo / máximo','Media anual','Volatilidad anual','Contribución al riesgo'],rows:x.ids.map((_,i)=>[x.names[i]!,pct(p.weights[i]!),`${x.minWeights?.[i]==null?'Base 0 %':pct(x.minWeights[i]!)} / ${x.maxWeights?.[i]==null?'Base 100 %':pct(x.maxWeights[i]!)}`,pct(x.means[i]!/100),pct(Math.sqrt(x.cov[i]![i]!)/100),p.vol>0?pct(p.riskShares[i]!):'No definida']),charts});
+  }
   if(portfolio.tracking){const rows=accountSeries(portfolio),first=rows[0]!,last=rows.at(-1)!;add('portfolio',[`Seguimiento de la cuenta: ${rows.length} valoraciones declaradas, de ${first.date} a ${last.date}. Saldo actual ${euro(last.value)}. Resultado monetario desde inicio, descontando flujos: ${euro(last.value-first.value-rows.slice(1).reduce((s,r)=>s+r.netFlow,0))}. La rentabilidad usa la convención de flujos al cierre del periodo y requiere conciliar las valoraciones con los extractos.`]);}
   const data=person.histories?.find(h=>h.portfolioId===portfolio.id);
   if(proposal?.positions.length)add('risk',[`Escenario hipotético del reparto: pérdida de ${euro(proposal.stressLoss)} sobre ${euro(proposal.amount)}. No es una previsión, un máximo ni una probabilidad.`, 'Hipótesis simultáneas: empresas -50 %, bonos globales -15 %, bonos cortos -7 %, bonos muy cortos -3 %, bloque a un día -1 %. No equivalen a observaciones históricas.']);
@@ -68,9 +92,9 @@ export function buildProfessionalReport(person:Person,adviser:AdviserSettings,op
       ...(technical?[`Asimetría descriptiva: ${r.skewness.toFixed(3)}; exceso de curtosis: ${r.excessKurtosis.toFixed(3)}; autocorrelación a un mes: ${r.autocorrelation.toFixed(3)}; autocorrelación de cuadrados: ${r.squaredAutocorrelation.toFixed(3)}.`,`Comprobación temporal VaR 95 %: ${r.backtest.breaches} excedencias / ${r.backtest.observations} meses evaluables, frente a ${r.backtest.expected.toFixed(1)} esperadas. Ventanas previas de 60 meses; sin observaciones futuras en cada cálculo. No es una certificación estadística del modelo.`]:[]),
     ],['Medida','Resultado'],[['Rendimiento anualizado histórico',pct(r.annualizedReturn)],['Volatilidad anualizada',pct(r.volatility)],['Mayor caída observada',pct(r.drawdown)],['VaR 95 % · un mes',pct(r.var95.var)+' / '+euro(r.var95.var*total)],['ES 95 % · un mes',pct(r.var95.es)+' / '+euro(r.var95.es*total)],['VaR 99 % · un mes',pct(r.var99.var)+' / '+euro(r.var99.var*total)],['ES 99 % · un mes',pct(r.var99.es)+' / '+euro(r.var99.es*total)],['Posiciones efectivas · 1 / suma de pesos²',r.effectivePositions.toFixed(2)]]);
   }catch(error){add('risk',['No se calculan medidas históricas: '+(error instanceof Error?error.message:'Datos incompatibles')]);}}
-  else add('risk',['No hay un histórico completo guardado para esta cartera. Se omiten las medidas históricas en lugar de usar referencias del catálogo como si fueran observaciones. La terminal lo descarga al abrir Análisis de riesgo cuando el proveedor tiene cobertura.']);
+  else add('risk',['No hay un histórico completo guardado para esta cartera. Se omiten las medidas históricas en lugar de usar referencias del catálogo como si fueran observaciones. La terminal lo descarga al abrir el análisis dentro de la cartera cuando el proveedor tiene cobertura.']);
   if(proposal?.positions.length)add('costs',[`Coste corriente ponderado de los productos: ${proposal.feePct.toFixed(3)} % anual, aproximadamente ${euro(proposal.feeAnnual)} sobre capital constante. Datos del emisor revisados el ${proposal.catalogDate}.`, 'TER/OCF: no incluyen todos los gastos de negociación, spreads, transacciones, custodia, asesoramiento ni fiscalidad. No confundir con una rentabilidad neta.']);
-  if(proposal?.kind==='objective')add('costs',['Proyección de acumulación omitida: el capital de esta cartera objetivo no está disponible hoy. El coste indicado solo describe el escenario de referencia.']);
+  if(proposal?.kind==='objective'||portfolio.optimizationStudy?.unfundedObjective)add('costs',['Proyección de acumulación omitida: el capital de esta cartera objetivo no está disponible hoy. El coste indicado solo describe el escenario de referencia.']);
   else if(planning)add('costs',['Proyecciones omitidas: primero debe definirse qué capital se invertirá y en qué productos. No se aplica una rentabilidad supuesta al dinero pendiente.']);
   else if(options.sections.includes('costs')){
     const productFee=proposal?.feePct??options.productFee,contribution=proposal?.monthly??person.profile.monthlyContribution;
@@ -87,7 +111,7 @@ export function buildProfessionalReport(person:Person,adviser:AdviserSettings,op
   add('mortgage',m.principal>0?[`Capital pendiente registrado: ${euro(m.principal)}; tipo nominal anual ${m.rate} %; plazo ${m.years} años.`,`Cuota mensual teórica: ${euro(q)}. Intereses teóricos hasta el final: ${euro(Math.max(0,q*n-m.principal))}. Sistema francés con cuotas constantes y tipo fijo supuesto.`,`Amortización adicional registrada: ${euro(m.extraMonthly)} al mes; no incluida en esta cuota base. Consulta el simulador para comparar estrategias.`,`No es la TAE ni una oferta vinculante. Faltan seguros, comisiones, fechas exactas, reglas contractuales de revisión del tipo y posibles compensaciones por amortización.`]:['No se ha registrado capital pendiente de préstamo.']);
   add('actions',[
     ...(!reviewed?['Completar o actualizar la revisión del asesor antes de emitir una propuesta de productos.']:[]),
-    ...(!data?['Actualizar y contrastar el histórico desde Análisis de riesgo antes de entregar cifras históricas.']:[]),
+    ...(!data?['Actualizar y contrastar el histórico desde el análisis de la cartera antes de entregar cifras históricas.']:[]),
     'Conciliar saldos, deudas, reservas y aportaciones con documentación actualizada; confirmar circunstancias que hayan cambiado.',
     'Explicar las pérdidas posibles y los costes en euros; comprobar la comprensión con palabras de la persona.',
     'Documentar la selección de productos y las preferencias, restricciones y sostenibilidad; entregar la información aplicable antes de cualquier operación.',
@@ -103,7 +127,7 @@ export function buildProfessionalReport(person:Person,adviser:AdviserSettings,op
     ...(technical?['Riesgo de modelo: una fórmula, una muestra o una hipótesis pueden representar mal el futuro. La calidad del cálculo no elimina el error de estimación, los sesgos de datos ni los cambios de dependencia entre activos.']:[]),
   ]);
   blocks.push({title:'Alcance, fuentes y límites',text:[
-    'Documento de trabajo de Prestafin Terminal 0.5.0. Los saldos, respuestas y preferencias son datos declarados. La revisión registrada no es una firma electrónica ni un certificado de cumplimiento. Este informe no sustituye la evaluación de idoneidad ni su explicación individualizada por el profesional responsable.',
+    'Documento de trabajo de Prestafin Terminal. Los saldos, respuestas y preferencias son datos declarados. La revisión registrada no es una firma electrónica ni un certificado de cumplimiento. Este informe no sustituye la evaluación de idoneidad ni su explicación individualizada por el profesional responsable.',
     'Los escenarios son hipotéticos. No se garantizan rentabilidades ni límites de pérdida. No se ejecutan operaciones. Fiscalidad y condiciones de productos requieren verificación individual y vigente.',
     'Fundamentos del módulo de análisis: Gerber y colaboradores (dependencia robusta, apéndice A-3); McNeil, Frey y Embrechts (VaR/ES y riesgo de cola); Danielsson y Tsay (volatilidad y diagnóstico temporal); Paleologo (concentración y contribución al riesgo); Hull (sensibilidad de bonos). Las implementaciones son parciales y no reproducen íntegramente los libros ni sus modelos.',
     'Referencias profesionales: CNMV, Idoneidad y Asesoramiento (cnmv.es/portal/inversor/idoneidad y /asesoramiento); ESMA, directrices sobre idoneidad; AEPD, seguridad de los tratamientos. Consultadas en octubre de 2026. La adecuación normativa de cada servicio debe ser validada por la entidad.',
@@ -111,14 +135,29 @@ export function buildProfessionalReport(person:Person,adviser:AdviserSettings,op
     ...(adviser.registration?['Identificación profesional declarada por el asesor (sin verificación automática): '+adviser.registration]:[]),
     ...(adviser.email?['Contacto del despacho: '+adviser.email]:[]),
   ]});
-  return {id,createdAt:now,person:person.name,reference:person.reference||person.id.slice(-6),firm:adviser.firm||'Prestafin',adviser:adviser.adviser||'Asesor pendiente de identificar',level:plain?'Explicación sencilla':technical?'Anexo técnico':'Lectura detallada',status:reviewed?'Documento de trabajo · entrevista revisada':'Borrador · revisión pendiente',blocks,footer:adviser.footer};
+  enrichReport(blocks,person,options,names,interview);
+  blocks.sort((a,b)=>(a.section?options.sections.indexOf(a.section):options.sections.length)-(b.section?options.sections.indexOf(b.section):options.sections.length));
+  return {id,createdAt:now,person:person.name,reference:person.reference||person.id.slice(-6),firm:adviser.firm||'Prestafin',adviser:adviser.adviser||'Asesor pendiente de identificar',level:plain?'Explicación sencilla':technical?'Anexo técnico':'Lectura detallada',status:reviewed?'Documento de trabajo · entrevista revisada':'Borrador · revisión pendiente',blocks,footer:adviser.footer,presentation:{title:options.title.trim()||'Informe patrimonial y financiero',subtitle:options.subtitle,purpose:options.purpose,includeCover:options.includeCover,includeContents:options.includeContents,includeTables:options.includeTables,chartTheme:options.chartTheme}};
 }
 
 /** Reusable paginated layout; rows and text split before crossing the footer. */
 export function professionalPDF(report:ProfessionalReport,logo?:string){
   const pdf=new jsPDF({unit:'mm',format:'a4',compress:true}),left=18,width=174,bottom=276;let y=0;
-  const clean=(s:string)=>s.replaceAll('\u202f',' ').replaceAll('\u00a0',' ').replaceAll('−','-').replaceAll('→',' > ').replaceAll('²','2');
-  function header(){pdf.setFillColor(17,57,57);pdf.rect(0,0,210,31,'F');if(logo){pdf.setFillColor(255,255,255);pdf.roundedRect(left,6,46,18,2,2,'F');pdf.addImage(logo,'PNG',left+4,10,38,9);}else{pdf.setTextColor(255);pdf.setFont('helvetica','bold');pdf.setFontSize(17);pdf.text('PRESTAFIN',left,18);}pdf.setTextColor(255);pdf.setFont('helvetica','normal');pdf.setFontSize(8);pdf.text('INFORME PERSONAL',192,14,{align:'right'});pdf.text(clean(report.reference).slice(0,45),192,21,{align:'right'});y=41;}
+  const clean=(s:string)=>s.replaceAll('\u202f',' ').replaceAll('\u00a0',' ').replaceAll('−','-').replaceAll('→',' > ').replaceAll('²','^2');
+  function header(){
+    pdf.setFillColor(17,57,57);pdf.rect(0,0,210,31,'F');
+    if(logo){
+      pdf.setFillColor(255,255,255);pdf.roundedRect(left,6,18,18,2,2,'F');
+      pdf.addImage(logo,'PNG',left+1,7,16,16,'prestafin-isotipo');
+    }
+    pdf.setTextColor(255);pdf.setFont('helvetica','bold');pdf.setFontSize(14);
+    pdf.text('PRESTAFIN-TERMINAL',logo?left+23:left,18);
+    pdf.setFont('helvetica','normal');pdf.setFontSize(8);
+    pdf.text('INFORME PERSONAL',192,14,{align:'right'});
+    let reference=clean(report.reference).slice(0,45);
+    while(pdf.getTextWidth(reference)>67)reference=reference.slice(0,-1);
+    pdf.text(reference,192,21,{align:'right'});y=41;
+  }
   function page(){pdf.addPage();header();}
   function need(height:number){if(y+height>bottom)page();}
   function paragraph(text:string,size=9){pdf.setFont('helvetica','normal');pdf.setFontSize(size);const lines=pdf.splitTextToSize(clean(text),width) as string[];const height=lines.length*4.6+3;if(height<bottom-41)need(height);pdf.setFont('helvetica','normal');pdf.setFontSize(size);for(const line of lines){need(5);pdf.setFont('helvetica','normal');pdf.setFontSize(size);pdf.setTextColor(35,61,63);pdf.text(line,left,y);y+=4.6;}y+=3;}
@@ -140,12 +179,37 @@ export function professionalPDF(report:ProfessionalReport,logo?:string){
     }
     need(20);draw(headers,true);for(const row of rows)draw(row,false);y+=8;
   }
+  const presentation=report.presentation;
   header();
+  title(presentation.title);if(presentation.subtitle)paragraph(presentation.subtitle,11);y+=5;
   pdf.setFont('helvetica','bold');pdf.setFontSize(21);pdf.setTextColor(17,57,57);
   const nameLines=pdf.splitTextToSize(clean(report.person),width) as string[];pdf.text(nameLines,left,y);y+=nameLines.length*8+3;
   paragraph(report.level+' · '+report.status);paragraph(report.firm+' · '+report.adviser);paragraph(new Date(report.createdAt).toLocaleString('es-ES')+' · ID '+report.id,8);y+=6;
-  for(const block of report.blocks){pdf.setFont('helvetica','normal');pdf.setFontSize(9);const firstHeight=(pdf.splitTextToSize(clean(block.text[0]??''),width) as string[]).length*4.6+3;need(Math.min(bottom-41,20+firstHeight));title(block.title);for(const text of block.text)paragraph(text);if(block.headers&&block.rows?.length)table(block.headers,block.rows);}
+  if(presentation.purpose){title('Objetivo y alcance del encargo');paragraph(presentation.purpose);}
+  if(presentation.includeCover){paragraph('Documento preparado a partir de los datos guardados de esta persona. Los saldos declarados, las reconstrucciones históricas y las proyecciones hipotéticas se identifican por separado. Las cifras deben contrastarse con documentación actualizada.');page();}
+  let contentsPage:number|null=null;
+  if(presentation.includeContents){if(y>45)page();contentsPage=pdf.getNumberOfPages();title('Contenido del informe');page();}
+  const contents:{title:string;page:number}[]=[];
+  for(const block of report.blocks){
+    pdf.setFont('helvetica','normal');pdf.setFontSize(9);
+    const firstHeight=(pdf.splitTextToSize(clean(block.text[0]??''),width) as string[]).length*4.6+3;
+    need(Math.min(bottom-41,20+firstHeight));contents.push({title:block.title,page:pdf.getNumberOfPages()});title(block.title);
+    for(const text of block.text)paragraph(text);
+    for(const chart of block.charts??[]){
+      const scene=reportGraphic(chart,presentation.chartTheme),figureHeight=scene.height*width/scene.width;
+      pdf.setFontSize(8);const captionHeight=(pdf.splitTextToSize(clean(chart.caption),width) as string[]).length*4.6+3;
+      need(figureHeight+captionHeight+19);pdf.setTextColor(17,76,70);pdf.setFont('helvetica','bold');pdf.setFontSize(10);pdf.text(clean(chart.title),left,y+2);y+=7;
+      y+=drawReportGraphic(pdf,chart,left,y,width,presentation.chartTheme)+5;paragraph(chart.caption,8);y+=4;
+    }
+    if(presentation.includeTables&&block.headers&&block.rows?.length)table(block.headers,block.rows);
+  }
+  if(contentsPage){
+    const current=pdf.getNumberOfPages();pdf.setPage(contentsPage);let at=62;
+    pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,61,63);
+    for(const entry of contents){pdf.text(clean(entry.title),left,at);pdf.text(String(entry.page),192,at,{align:'right'});pdf.setDrawColor(220,231,227);pdf.line(left,at+4,192,at+4);at+=14;}
+    pdf.setPage(current);
+  }
   if(report.footer){title('Nota del despacho');paragraph(report.footer);}
-  const pages=pdf.getNumberOfPages();for(let i=1;i<=pages;i++){pdf.setPage(i);pdf.setDrawColor(210,224,220);pdf.line(18,283,192,283);pdf.setFont('helvetica','normal');pdf.setFontSize(7);pdf.setTextColor(80,100,98);pdf.text('PRESTAFIN · Información financiera personal · '+clean(report.reference).slice(0,45),18,289);pdf.text(`${i} / ${pages}`,192,289,{align:'right'});}
-  pdf.setProperties({title:'Prestafin · '+report.person,subject:report.level,author:report.adviser,creator:'Prestafin Terminal 0.5.0'});return pdf;
+  const pages=pdf.getNumberOfPages();for(let i=1;i<=pages;i++){pdf.setPage(i);pdf.setDrawColor(210,224,220);pdf.line(18,283,192,283);pdf.setFont('helvetica','normal');pdf.setFontSize(7);pdf.setTextColor(80,100,98);pdf.text('PRESTAFIN-TERMINAL · Información financiera personal · '+clean(report.reference).slice(0,45),18,289);pdf.text(`${i} / ${pages}`,192,289,{align:'right'});}
+  pdf.setProperties({title:presentation.title+' · '+report.person,subject:report.level,author:report.adviser,creator:'Prestafin Terminal'});return pdf;
 }
