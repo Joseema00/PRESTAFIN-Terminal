@@ -47,7 +47,7 @@
     "typescript": "^5.8.3",
     "vite": "^8.1.5"
   },
-  "version": "0.26.0",
+  "version": "0.27.0",
   "description": "Terminal de escritorio de Prestafin",
   "author": "Prestafin",
   "main": "desktop/main.mjs",

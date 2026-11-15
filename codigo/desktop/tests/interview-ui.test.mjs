@@ -394,7 +394,7 @@ test('UI: investments enter tracking and net wealth only on registration, and th
  assert.notEqual(captured.portfolios.active.id,proposalId);assert.ok(captured.portfolios.active.tracking);assert.equal(captured.people.active.profile.cash,20000);
  assert.ok(captured.portfolios.portfolios.find(c=>c.id===proposalId).proposal);assert.ok(saved.people[0].portfolios.at(-1).tracking);
  await action(()=>router.navigate({to:'/persona'}));assert.match(document.body.textContent,/Sin préstamo registrado/);assert.ok(document.querySelectorAll('.chart-panel').length>=8);assert.match(document.body.textContent,/90[.\s]?000/);
- await action(()=>router.navigate({to:'/analisis'}));assert.match(document.body.textContent,/HISTÓRICO POR PRODUCTO/);await click('Ver hipótesis de planificación');assert.match(document.body.textContent,/Escenarios de estrés en euros/);assert.ok(!document.body.textContent.includes('CSV con separador'));
+ await action(()=>router.navigate({to:'/analisis'}));assert.match(document.body.textContent,/MODELO DE PLANIFICACIÓN/);assert.match(document.body.textContent,/Escenarios de estrés en euros/);assert.ok(!document.body.textContent.includes('CSV con separador'));
 });
 
 test('UI: fund templates preserve the person and open their normal portfolio with its historical fund sheet',async()=>{
@@ -701,7 +701,7 @@ test('one-click fund creation leaves the account unchanged if the interview bloc
  assert.equal(captured.models.ownModels.length,0);assert.equal(captured.portfolios.portfolios.length,250);
 });
 
-test('UI billing: setup pending disables payments; verified account selects annual checkout and manages cancellation',async()=>{
+test('UI billing: new plans stay coming soon without navigation; existing customers retain management',async()=>{
   let state={configured:false,email:null,eligible:false,subscription:null};let selected=null,portal=0;
   window.prestafin.billingStatus=async()=>structuredClone(state);
   window.prestafin.billingCheckout=async plan=>{selected=plan;return true;};
@@ -713,8 +713,8 @@ test('UI billing: setup pending disables payments; verified account selects annu
   await action(()=>router.navigate({to:'/persona'}));
   state={configured:true,email:'billing@example.test',eligible:false,subscription:null,trialAvailable:true,hasCustomer:false,environment:'test'};
   await action(()=>router.navigate({to:'/suscripcion'}));
-  annual=document.querySelector('[aria-label="Plan anual"] button');assert.equal(annual.disabled,false);
-  await action(()=>annual.click());assert.equal(selected,'year');assert.match(document.body.textContent,/Stripe se ha abierto/);
+  annual=document.querySelector('[aria-label="Plan anual"] button');assert.equal(annual.disabled,true);assert.match(annual.textContent,/Próximamente/);
+  await action(()=>annual.click());assert.equal(selected,null);assert.ok(!document.body.textContent.includes('Stripe se ha abierto'));
   state={...state,eligible:true,hasCustomer:true,trialAvailable:false,subscription:{status:'trialing',plan:'year',periodEnd:1900000000,trialEnd:1900000000,cancelAtPeriodEnd:true,cancelAt:null}};
   await click('Actualizar estado');assert.match(document.body.textContent,/Renovación cancelada/);
   assert.equal(document.querySelector('[aria-label="Plan anual"] button').disabled,true);
@@ -926,7 +926,28 @@ test('UI: a failed refresh is visible and preserves the verified historical anal
 });
 
 
-test('UI PRESTAFIN30: active promotion shows its fixed expiry, permits paid plans and preserves permanent access',async()=>{
+test('UI lab: missing history retains capital, optional defaults and a clearly labelled stochastic simulation',async()=>{
+ const {PortfolioLab:EnhancedLab}=await import('../../desktop-ui/portfolio-lab.tsx');
+ const node=document.createElement('div');document.body.append(node);const labRoot=createRoot(node);
+ const c={id:'lab-ui-only',name:'Cartera sintética sin histórico',holdings:[{assetId:'unknown-class',amount:10000,meta:{symbol:'UNKNOWN',name:'Fondo ficticio sin clasificar',kind:'Fondo',currency:'EUR'}}]};
+ const render=()=>labRoot.render(h(QueryClientProvider,{client:queryClient},h(EnhancedLab,{portfolio:c,mode:'montecarlo',monthly:0})));
+ try{
+  await action(render);await action(()=>new Promise(r=>setTimeout(r,450)));
+  assert.match(node.textContent,/hipótesis genérica editable/);assert.match(node.textContent,/10[.\s]?000/);assert.match(node.textContent,/Abanico de escenarios/);assert.ok(node.querySelectorAll('.chart-panel').length>=5);
+  assert.ok([...node.querySelectorAll('input')].every(i=>!i.required));
+  for(const label of ['Deriva anual de planificación (%)','Volatilidad anual (%)']){const el=node.querySelector('input[aria-label="'+label+'"]');await action(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'0');el.dispatchEvent(new Event('input',{bubbles:true}));});}
+  await action(()=>new Promise(r=>setTimeout(r,450)));assert.match(node.textContent,/0 % simulado|0 %/);assert.ok(!node.textContent.includes('NaN'));
+  const el=node.querySelector('input[aria-label="Volatilidad anual (%)"]');await action(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'');el.dispatchEvent(new Event('input',{bubbles:true}));});await action(()=>new Promise(r=>setTimeout(r,450)));assert.equal(el.value,'');assert.match(node.textContent,/Abanico de escenarios/);assert.ok(!node.textContent.includes('Completa parámetros'));
+ }finally{await action(()=>labRoot.unmount());node.remove();}
+});
+
+test('UI lab: alternatives compare complete metrics without editing the portfolio or requiring fields',async()=>{
+ const {PortfolioLab:EnhancedLab}=await import('../../desktop-ui/portfolio-lab.tsx');const node=document.createElement('div');document.body.append(node);const labRoot=createRoot(node);
+ const c={id:'lab-alternatives-ui',name:'Comparación sintética',holdings:[{assetId:'research-fidelity',amount:6000},{assetId:'research-vanguard-bond-fund',amount:4000}]},before=structuredClone(c);
+ try{await action(()=>labRoot.render(h(QueryClientProvider,{client:queryClient},h(EnhancedLab,{portfolio:c,mode:'optimization'}))));assert.match(node.textContent,/5 fondos para contrastar/);assert.match(node.textContent,/CVaR normal/);assert.match(node.textContent,/Sortino normal/);assert.ok(node.querySelectorAll('tbody tr').length>=3);assert.ok([...node.querySelectorAll('input')].every(i=>!i.required));assert.deepEqual(c,before);assert.ok(!node.textContent.includes('NaN'));}finally{await action(()=>labRoot.unmount());node.remove();}
+});
+
+test('UI PRESTAFIN30: active promotion shows its fixed expiry, upcoming plans never navigate and permanent access is preserved',async()=>{
  const {BillingContext}=await import('../../desktop-ui/billing.tsx');
  const node=document.createElement('div');document.body.append(node);const promoRoot=createRoot(node);
  const started=Date.now(),expires=started+30*86400000;
@@ -940,8 +961,8 @@ test('UI PRESTAFIN30: active promotion shows its fixed expiry, permits paid plan
   assert.match(node.textContent,/Prueba de 30 días activa/);assert.match(node.textContent,/Quedan 30 días/);assert.match(node.textContent,/sin tarjeta/);
   assert.ok(node.textContent.includes(new Intl.DateTimeFormat('es-ES',{dateStyle:'long',timeStyle:'short'}).format(expires)));
   assert.ok(!/14 días|Empezar 14/.test(node.textContent));assert.ok(node.querySelector('[data-promo-protected]'));
-  let plans=[...node.querySelectorAll('.billing-plan button')];assert.equal(plans.length,2);assert.ok(plans.every(b=>!b.disabled));
-  await action(()=>plans[1].click());assert.equal(selected,'year');assert.equal(refreshes,1);assert.ok(node.querySelector('[data-promo-protected]'));
+  let plans=[...node.querySelectorAll('.billing-plan button')];assert.equal(plans.length,2);assert.ok(plans.every(b=>b.disabled&&b.textContent.includes('Próximamente')));
+  await action(()=>plans[1].click());assert.equal(selected,null);assert.equal(refreshes,0);assert.ok(node.querySelector('[data-promo-protected]'));
   state={...state,license:{kind:'pro_permanent',status:'active',permanent:true,activatedAt:new Date(started).toISOString()}};
   await action(render);
   assert.match(node.querySelector('[aria-label="Código de activación"]').textContent,/Licencia permanente/);

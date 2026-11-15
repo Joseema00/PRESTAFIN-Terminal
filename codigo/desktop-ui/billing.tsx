@@ -69,7 +69,6 @@ export function BillingPage({accountOnly=false}:{accountOnly?:boolean}) {
   const subscription=state?.subscription;
   const existing=subscription&&!['canceled','incomplete_expired'].includes(subscription.status);
   const permanent=isPermanentLicense(state?.license),promo=isActivePromo(state?.license,now),promoEnd=licenseExpiry(state?.license);
-  const disabled=busy||loading||!state?.configured||!state.email||!!error||!!existing||permanent;
   return <div className="billing-page">
     <div className="terminal-page-title"><span>{accountOnly?'CUENTA DE USUARIO':'CUENTA Y FACTURACIÓN'}</span><h1>{accountOnly?'Tu cuenta de Prestafin Terminal':'Tu suscripción a Prestafin Terminal'}</h1><p>{accountOnly?'Regístrate o inicia sesión con tu correo y contraseña.':'Un único plan con todas las herramientas. Elige cómo quieres pagarlo.'}</p></div>
     {loading&&<p role="status">Comprobando la suscripción…</p>}
@@ -93,10 +92,10 @@ export function BillingPage({accountOnly=false}:{accountOnly?:boolean}) {
       <span className="billing-kicker">{plan==='month'?'FLEXIBILIDAD MENSUAL':'MEJOR PRECIO ANUAL'}</span><h2>{plan==='month'?'Mensual':'Anual'}</h2><p className="billing-price">{plan==='month'?'50':'490'} €<span>/{plan==='month'?'mes':'año'}</span></p>
       <p className="billing-saving">{plan==='year'?'Ahorras 110 € al año · equivalente a 40,83 €/mes':'Facturación mensual · 600 € en doce meses'}</p>
       <ul><li><Check size={16}/>Todas las herramientas de la terminal</li><li><Check size={16}/>Personas, patrimonio y carteras</li><li><Check size={16}/>Fichas de fondos, gráficos e informes PDF</li><li><Check size={16}/>Gestión de facturas y cancelación en Stripe</li></ul>
-      <button className={'terminal-button '+(plan==='year'?'primary':'')} disabled={disabled} onClick={()=>void action(()=>window.prestafin!.billingCheckout(plan),'Stripe se ha abierto en tu navegador. Completa el alta y vuelve para actualizar el estado.')}><CreditCard size={17}/>{permanent?'Tu licencia es permanente':existing?'Gestiona tu plan en Stripe':'Contratar plan '+(plan==='month'?'mensual':'anual')}</button>
+      <button className={'terminal-button '+(plan==='year'?'primary':'')} disabled aria-disabled="true"><CreditCard size={17}/>Próximamente</button>
       <p className="billing-small">{plan==='month'?'50 € cada mes':'490 € cada año en un único cargo'}. Renovación automática hasta cancelar.</p>
     </section>)}</div>
-    <section className="terminal-panel billing-details"><h2>Cómo funciona</h2><p>Activa el código PRESTAFIN30 para probar la terminal durante 30 días sin tarjeta. Se utiliza una sola vez por cuenta y no inicia una suscripción ni una renovación automática. Cuando termine, necesitarás contratar un plan para continuar.</p><p>Puedes contratar un plan durante la prueba. Al hacerlo, Stripe muestra el importe, los impuestos aplicables y las condiciones del cobro antes de confirmar. Prestafin Terminal no guarda los datos de tu tarjeta. Para verificar el acceso necesitas conexión a Internet.</p><p>La suscripción corresponde a tu cuenta de acceso, no a las personas que gestionas en la terminal. Tus fichas, respuestas y carteras se guardan en tu cuenta y no se envían a Stripe.</p></section>
+    <section className="terminal-panel billing-details"><h2>Cómo funciona</h2><p>Activa el código PRESTAFIN30 para probar la terminal durante 30 días sin tarjeta. Se utiliza una sola vez por cuenta y no inicia una suscripción ni una renovación automática. Cuando termine, necesitarás un plan activo o una licencia permanente para continuar.</p><p>La contratación de nuevos planes estará disponible próximamente. Los botones mensual y anual no abren ninguna página ni crean cargos. Las suscripciones y licencias permanentes existentes mantienen su acceso y gestión. Para verificar el acceso necesitas conexión a Internet.</p><p>La suscripción corresponde a tu cuenta de acceso, no a las personas que gestionas en la terminal. Tus fichas, respuestas y carteras se guardan en tu cuenta y no se envían a Stripe.</p></section>
     </>}
   </div>;
 }

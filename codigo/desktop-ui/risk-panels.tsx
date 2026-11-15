@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ResponsiveContainer,ComposedChart,Area,Line,BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ReferenceLine,Cell } from 'recharts';
 import type { Portfolio } from '../src/lib/portfolio';
 import { useIntegratedRisk } from './use-integrated-risk';
@@ -8,17 +8,27 @@ export const money=(n:number)=>n.toLocaleString('es-ES',{style:'currency',curren
 export const percent=(n:number,d=1)=>n.toLocaleString('es-ES',{maximumFractionDigits:d})+' %';
 export const colors=['#64bda2','#6a8fc6','#d8b777','#a89aca','#d48a76','#8fa9a3'];
 export const tip={background:'var(--popover)',border:'1px solid var(--border)',borderRadius:10,color:'var(--foreground)',fontSize:12};
-export function ChartBox({title,note,children}:{title:string;note?:string;children:React.ReactNode}){
- const [expanded,setExpanded]=useState(false);
+export function ChartBox({title,note,children,insights=[]}:{title:string;note?:string;children:React.ReactNode;insights?:string[]}){
+ const [expanded,setExpanded]=useState(false),[exportError,setExportError]=useState(''),[exporting,setExporting]=useState(false),container=useRef<HTMLDivElement>(null);
+ async function exportChart(){
+  setExportError('');setExporting(true);
+  try{
+   const original=container.current?.querySelector('svg.recharts-surface')??container.current?.querySelector('svg');if(!original)throw new Error('El gráfico todavía no está disponible. Se conserva el resto del estudio.');
+   const svg=original.cloneNode(true) as SVGElement,rect=original.getBoundingClientRect(),width=Math.max(300,rect.width),height=Math.max(200,rect.height);svg.setAttribute('xmlns','http://www.w3.org/2000/svg');svg.setAttribute('width',String(width));svg.setAttribute('height',String(height));svg.querySelectorAll('text').forEach(t=>{t.setAttribute('fill','#153a3b');t.setAttribute('font-family','Arial, sans-serif');});
+   const img=new Image();await new Promise<void>((resolve,reject)=>{img.onload=()=>resolve();img.onerror=()=>reject(new Error('No se pudo preparar el gráfico para el PDF.'));img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(svg));});
+   const canvas=document.createElement('canvas');canvas.width=Math.ceil(width*2);canvas.height=Math.ceil(height*2);const ctx=canvas.getContext('2d');if(!ctx)throw new Error('No está disponible la exportación gráfica.');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+   const {jsPDF}=await import('jspdf'),pdf=new jsPDF({orientation:'landscape'});pdf.setFontSize(16);pdf.text('PRESTAFIN TERMINAL',14,15);pdf.setFontSize(12);pdf.text(pdf.splitTextToSize(title,265),14,25);const chartHeight=Math.min(120,265*height/width);pdf.addImage(canvas.toDataURL('image/png'),'PNG',14,35,265,chartHeight);pdf.setFontSize(9);const lines=pdf.splitTextToSize([note,...insights].filter(Boolean).join('\n'),265);pdf.text(lines.slice(0,12),14,42+chartHeight);pdf.save('Prestafin-grafico-'+title.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/gi,'-').slice(0,65)+'.pdf');
+  }catch(e){setExportError(e instanceof Error?e.message:'No se pudo exportar el gráfico.');}finally{setExporting(false);}
+ }
  useEffect(()=>{if(!expanded)return;const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape')setExpanded(false);};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[expanded]);
- return <section className={'terminal-panel chart-panel interactive-chart'+(expanded?' chart-expanded':'')}><div className="panel-heading"><h3>{title}</h3><button className="terminal-button secondary" aria-label={(expanded?'Reducir gráfico: ':'Ampliar gráfico: ')+title} aria-pressed={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Reducir · Esc':'Ampliar gráfico'}</button></div>{note&&<p>{note}</p>}<div className="chart-canvas">{children}</div></section>;
+ return <section className={'terminal-panel chart-panel interactive-chart'+(expanded?' chart-expanded':'')}><div className="panel-heading"><h3>{title}</h3><div className="chart-export-actions"><button className="terminal-button secondary" disabled={exporting} onClick={()=>void exportChart()}>{exporting?'Preparando PDF…':'Gráfico y conclusiones PDF'}</button><button className="terminal-button secondary" aria-label={(expanded?'Reducir gráfico: ':'Ampliar gráfico: ')+title} aria-pressed={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Reducir · Esc':'Ampliar gráfico'}</button></div></div>{note&&<p>{note}</p>}<div ref={container} className="chart-canvas">{children}</div>{insights.length>0&&<div className="chart-insights"><strong>Qué muestra este gráfico</strong><ul>{insights.map((text,i)=><li key={i}>{text}</li>)}</ul></div>}{exportError&&<p role="status">{exportError}</p>}</section>;
 }
 export function Kpis({items}:{items:{title:string;value:string;note:string}[]}){return <div className="terminal-kpis">{items.map(x=><div key={x.title}><span>{x.title}</span><strong>{x.value}</strong><small>{x.note}</small></div>)}</div>;}
 export function RiskPanels({portfolio,initialSection='all'}:{portfolio:Portfolio;initialSection?:'all'|'stress'|'history'}){
  const [riskFree,setRiskFree]=useState(2.2),[method,setMethod]=useState<'sample'|'shrinkage'|'gerber'>('shrinkage');
  const data=useIntegratedRisk(portfolio,riskFree,method),r=data.analysis,m=data.model;
  const total=portfolio.holdings.reduce((s,h)=>s+h.amount,0);
- const [basis,setBasis]=useState<'auto'|'model'>('auto');const observed=!!r&&basis==='auto',planning=basis==='model'||initialSection==='stress';
+ const [basis,setBasis]=useState<'auto'|'model'>('auto');const observed=!!r&&basis==='auto',planning=basis==='model'||initialSection==='stress'||(!r&&!!m);
  const contributions=observed?data.history!.columns.map((id,i)=>({name:data.positions.find(p=>p.id===id)?.name??id,capital:r!.weights[i]!*100,risk:r!.risk.shares[i]!*100})):m?data.positions.map((p,i)=>({name:p.name,capital:m.weights[i]!*100,risk:m.shares[i]!*100})):[];
  const cov=observed?r!.covariance:m?.cov??[];
  const labels=observed?data.history!.columns.map(id=>data.positions.find(p=>p.id===id)?.name??id):data.positions.map(p=>p.name);
