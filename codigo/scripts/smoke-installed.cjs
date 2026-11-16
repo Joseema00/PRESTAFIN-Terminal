@@ -23,6 +23,8 @@ app.on('browser-window-created',(_event,window)=>{
   try{
    const result={version,archiveSha256,isolatedProfile:true};
    await waitFor(()=>win.webContents.executeJavaScript("!!document.querySelector('#account-email')"));result.loginScreen=true;
+   await waitFor(()=>win.webContents.executeJavaScript(`document.querySelector('[data-app-version]')?.getAttribute('data-app-version')===${JSON.stringify(version)}`));
+   result.displayedVersion=await win.webContents.executeJavaScript("document.querySelector('[data-app-version]').getAttribute('data-app-version')");assert.equal(result.displayedVersion,version);
    const fixture=process.env.PRESTAFIN_SMOKE_FIXTURE;
    if(fixture){
     const user=JSON.parse(fs.readFileSync(fixture,'utf8'))[1];
