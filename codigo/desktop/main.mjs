@@ -111,7 +111,7 @@ async function start() {
   handle('billing:portal',()=>billing.portal());
   handle('billing:logout',async()=>{await accountSpaces.flush();const result=await billing.logout();accountSpaces.stores?.clear();return result;});
   handle('workspace:confirmReload',async()=>{const choice=await dialog.showMessageBox(window,{type:'question',buttons:['Cancelar','Recargar desde mi cuenta'],defaultId:0,cancelId:0,message:'¿Volver a cargar los datos guardados en tu cuenta?',detail:'Los cambios de esta ventana que no se hayan guardado se descartarán. Puedes exportarlos antes de recargar.'});return choice.response===1;});
-  handle('app:info',() => ({version:app.getVersion(),dataPath:app.getPath('userData'),mode:billing.config?.cloudEnabled?'cloud':'local'}));
+  handle('app:info',async() => ({version:JSON.parse(await readFile(path.join(root,'package.json'),'utf8')).version,dataPath:app.getPath('userData'),mode:billing.config?.cloudEnabled?'cloud':'local'}));
   session.defaultSession.setPermissionRequestHandler((_wc,_permission,callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   // The renderer only talks to packaged resources. Provider requests run through narrow IPC methods.
