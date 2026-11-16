@@ -3,6 +3,7 @@ import {useBilling} from './billing';
 import {EmailAccount} from './email-account';
 import isotipo from '../src/assets/isotipo.png';
 import './welcome.css';
+import {AppVersion} from './app-version';
 export function Welcome({children}:{children:ReactNode}){
   const {state,loading,error,refresh}=useBilling();const [ready,setReady]=useState(false),[busy,setBusy]=useState(false);
   useEffect(()=>{const timer=setTimeout(()=>setReady(true),650);return()=>clearTimeout(timer);},[]);
@@ -13,7 +14,7 @@ export function Welcome({children}:{children:ReactNode}){
     <section className="welcome-access billing-page"><p className="welcome-eyebrow">BIENVENIDO A PRESTAFIN</p><h2>Accede a tu terminal</h2><p>Inicia sesión o crea tu cuenta para continuar.</p>
       {error&&<div className="terminal-warning" role="alert"><p>{error}</p><div className="billing-actions"><button className="terminal-button" disabled={busy} onClick={()=>void refresh()}>Reintentar conexión</button><button className="terminal-button" disabled={busy} onClick={()=>{setBusy(true);void window.prestafin?.billingLogout().then(refresh).finally(()=>setBusy(false));}}>Restablecer sesión</button></div></div>}
       <EmailAccount/>
-      <small>Al acceder podrás activar tu licencia o gestionar tu suscripción.</small>
+      <small>Al acceder podrás activar tu licencia o gestionar tu suscripción.</small><AppVersion/>
     </section>
   </main>;
 }

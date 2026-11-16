@@ -7,11 +7,10 @@ import {usePortfolios,usePeople,exportWorkspace,reloadAccountWorkspace} from './
 import {NAV,PERSON_ROUTES,PORTFOLIO_TOOLS,normalized} from './navigation';
 import {PanelBoundary} from './panel-boundary';
 import isotipo from '../src/assets/isotipo.png';
+import {AppVersion} from './app-version';
 
 const icons={people:Users,overview:LayoutDashboard,chart:ChartNoAxesCombined,simulation:FlaskConical,report:FileText,billing:CreditCard};
 export function Shell(){
- const [appVersion,setAppVersion]=useState<string|null>(null);
- useEffect(()=>{let active=true;void Promise.resolve().then(()=>window.prestafin?.appInfo?.()).then(info=>{if(active&&typeof info?.version==='string'&&/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(info.version))setAppVersion(info.version);}).catch(()=>{});return()=>{active=false;};},[]);
  const pathname=useRouterState({select:s=>s.location.pathname}),store=usePortfolios(),people=usePeople(),navigate=useNavigate();
  const current=NAV.find(n=>n.to===pathname)??NAV[2];
  const [command,setCommand]=useState(false),[search,setSearch]=useState(''),[activeResult,setActiveResult]=useState(0),[menu,setMenu]=useState(false),[guide,setGuide]=useState(false),[actionError,setActionError]=useState('');
@@ -36,7 +35,7 @@ export function Shell(){
    <div className="sidebar-person"><label htmlFor="selected-person">Ficha de trabajo</label><select id="selected-person" value={people.active?.id??''} disabled={!people.writable||!people.people.some(p=>!p.archived)} onChange={e=>{people.select(e.target.value);void navigate({to:'/persona'});}}><option value="" disabled>Selecciona una persona</option>{people.people.filter(p=>!p.archived).map(p=><option key={p.id} value={p.id}>{p.name} · {p.reference||p.id.slice(-6)}</option>)}</select></div>
    <nav aria-label="Navegación principal">{['Espacio de trabajo','Ficha seleccionada','Mi espacio'].map(group=><div className="navigation-group" key={group}><div className="sidebar-label">{group}</div>{NAV.filter(n=>n.group===group).map(n=>{const Icon=icons[n.icon];return PERSON_ROUTES.has(n.to)&&!people.active?<span key={n.to} className="terminal-nav disabled" aria-disabled="true" title="Selecciona una persona en el directorio"><Icon size={18}/><span>{n.label}</span></span>:<Link key={n.to} to={n.to} activeOptions={{exact:true}} className="terminal-nav" activeProps={{className:'terminal-nav active','aria-current':'page'}}><Icon size={18}/><span>{n.label}</span><ChevronRight size={13}/></Link>;})}</div>)}</nav>
    <button className="sidebar-help" onClick={()=>{setGuide(v=>!v);setMenu(false);}} aria-expanded={guide}><CircleHelp size={18}/><span>Cómo empezar<small>Guía rápida de la terminal</small></span></button>
-   <div className="sidebar-bottom"><span>Prestafin Terminal</span><small data-app-version={appVersion??undefined}>{appVersion?'Versión '+appVersion:'Consultando versión…'}</small></div>
+   <div className="sidebar-bottom"><span>Prestafin Terminal</span><AppVersion/></div>
   </aside>
   <section className="terminal-workspace" inert={command}>
    <header className="terminal-toolbar"><div><button className="icon-button menu-toggle" aria-label="Abrir menú" aria-expanded={menu} onClick={()=>setMenu(v=>!v)}><Menu size={21}/></button><span className="toolbar-prefix">{PERSON_ROUTES.has(pathname)?'Ficha de trabajo':'Mi espacio'}</span><ChevronRight size={14}/><strong>{pathname==='/entrevista'?'Cuestionario':current?.label}</strong></div><div><button ref={searchButton} className="command-button" onClick={()=>setCommand(true)}><Search size={17}/><span>Buscar herramienta</span><kbd>Ctrl K</kbd></button><button className="icon-button" aria-label={dark?'Cambiar a tema claro':'Cambiar a tema oscuro'} title={dark?'Tema claro':'Tema oscuro'} onClick={()=>setDark(!dark)}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button></div></header>
