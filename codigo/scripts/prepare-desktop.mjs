@@ -7,7 +7,7 @@ import {build} from 'vite';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // These original domain modules are dependency-free. No web server or secrets are bundled.
-const files = ['fund-identity','automatic-optimization','interview-model','client-plan','reference-models','account-models','fund-lookup','market/ft-funds.server','fund-catalog','fund-models','fund-performance','market/fund-provider.server','market/providers.server','market/metrics','market/provider-types','market/bundle.server','finance','wealth','risk-profile','people','interview-input','interview-plan','investment-products','portfolio-proposal','allocation-engine','portfolio-monitor','integrated-risk','adviser','professional-analysis'];
+const files = ['portfolio-lab','holding-classification','assets','assets-extended','fund-identity','automatic-optimization','interview-model','client-plan','reference-models','account-models','fund-lookup','market/ft-funds.server','fund-catalog','fund-models','fund-performance','market/fund-provider.server','market/providers.server','market/metrics','market/provider-types','market/bundle.server','finance','wealth','risk-profile','people','interview-input','interview-plan','investment-products','portfolio-proposal','allocation-engine','portfolio-monitor','integrated-risk','adviser','professional-analysis'];
 for (const file of files) {
   const input = path.join(root,'src/lib',file + '.ts');
   let js = stripTypeScriptTypes(await readFile(input,'utf8'),{mode:'strip'});

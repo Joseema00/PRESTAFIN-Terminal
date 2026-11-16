@@ -3,6 +3,7 @@ import { FundExplorer,FundModels,AllocationBreakdown } from './funds';
 import {AutomaticPortfolio} from './automatic-portfolio';
 import {DeletePortfolio} from './delete-portfolio';
 import {AdvancedOptimization} from './advanced-optimization';
+import {PortfolioLab} from './portfolio-lab';
 import {holdingProduct} from '../src/lib/holding-classification';
 import { MonteCarloPanel,RebalancePanel,BenchmarkPanel } from './portfolio-tools';
 import { useEffect,useMemo,useState } from 'react';
@@ -55,13 +56,13 @@ export function PortfolioWorkspace(){
    <TabsContent value="automatica" className="portfolio-tab-content"><AutomaticPortfolio onCreated={()=>changeTab('composicion')}/></TabsContent>
    <TabsContent value="composicion" className="portfolio-tab-content"><Composition portfolio={c} store={store} onOpenFund={openFund}/></TabsContent>
    <TabsContent value="optimizacion" className="portfolio-tab-content"><OptimizationModes key={c.id} portfolio={c} store={store}/></TabsContent>
-   <TabsContent value="riesgo" className="portfolio-tab-content"><RiskPanels portfolio={c}/></TabsContent>
-   <TabsContent value="estres" className="portfolio-tab-content"><RiskPanels portfolio={c} initialSection="stress"/></TabsContent>
+   <TabsContent value="riesgo" className="portfolio-tab-content"><PortfolioLab key={c.id+':risk'} portfolio={c} mode="risk"/><RiskPanels portfolio={c}/></TabsContent>
+   <TabsContent value="estres" className="portfolio-tab-content"><PortfolioLab key={c.id+':stress'} portfolio={c} mode="stress"/><RiskPanels portfolio={c} initialSection="stress"/></TabsContent>
    <TabsContent value="rebalanceo" className="portfolio-tab-content"><RebalancePanel key={c.id} portfolio={c}/></TabsContent>
-   <TabsContent value="montecarlo" className="portfolio-tab-content"><MonteCarloPanel portfolio={c} monthly={c.proposal?.monthly??store.profile.monthlyContribution}/></TabsContent>
-   <TabsContent value="benchmark" className="portfolio-tab-content"><BenchmarkPanel portfolio={c}/></TabsContent>
+   <TabsContent value="montecarlo" className="portfolio-tab-content"><PortfolioLab key={c.id+':mc'} portfolio={c} mode="montecarlo" monthly={c.proposal?.monthly??store.profile.monthlyContribution}/></TabsContent>
+   <TabsContent value="benchmark" className="portfolio-tab-content"><PortfolioLab key={c.id+':benchmark'} portfolio={c} mode="benchmark" monthly={c.proposal?.monthly??store.profile.monthlyContribution}/><BenchmarkPanel portfolio={c}/></TabsContent>
    <TabsContent value="seguimiento" className="portfolio-tab-content"><Tracking portfolio={c} store={store}/></TabsContent>
-   <TabsContent value="proyeccion" className="portfolio-tab-content"><Projection portfolio={c} store={store}/></TabsContent>
+   <TabsContent value="proyeccion" className="portfolio-tab-content"><PortfolioLab key={c.id+':projection'} portfolio={c} mode="projection" monthly={c.proposal?.monthly??store.profile.monthlyContribution}/></TabsContent>
    <TabsContent value="comparar" className="portfolio-tab-content"><Comparison store={store}/></TabsContent>
    <TabsContent value="modelos" className="portfolio-tab-content"><FundModels portfolio={c} store={store} onOpenFund={openFund} onOpenPortfolio={id=>{store.setActiveId(id);changeTab('composicion');}} horizonYears={horizonYears}/></TabsContent>
    <TabsContent value="fondos" className="portfolio-tab-content"><FundExplorer key={fundId} initialId={fundId}/></TabsContent>
@@ -82,7 +83,7 @@ function AssetSearch({portfolio:c,store}:{portfolio:Portfolio;store:Store}){
  return <section className="terminal-panel chart-panel"><h3>Añadir productos</h3><div className="chart-controls"><label>Nombre, símbolo o ISIN<input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar producto"/></label><label>Importe (€) · opcional<input aria-label="Importe del producto" type="number" min={0} max={1e12} value={amount??''} placeholder="Sin importe todavía" onChange={e=>setAmount(e.target.value===''?null:e.target.valueAsNumber)}/><small>Vacío: se guarda con 0 € y queda fuera del cálculo hasta completar el importe.</small></label></div><div className="instrument-results">{local.map(a=><button key={a.id} disabled={amount!==null&&(!Number.isFinite(amount)||amount<0||amount>1e12)} onClick={()=>store.addAsset(c.id,a.id,amount??0)}><span>{a.name}<small>{a.ticker} · {a.kind}</small></span><strong>Añadir</strong></button>)}{remote.results.filter(x=>!local.some(a=>a.ticker===x.symbol)).map(a=><button key={a.symbol} disabled={amount!==null&&(!Number.isFinite(amount)||amount<0||amount>1e12)} onClick={()=>store.addAsset(c.id,'market-'+a.symbol,amount??0,{symbol:a.symbol,name:a.name,kind:a.kind,currency:a.currency,isin:a.isin??null})}><span>{a.name}<small>{a.symbol} · resultado del proveedor</small></span><strong>Añadir</strong></button>)}</div></section>;
 }
 function OptimizationModes({portfolio,store}:{portfolio:Portfolio;store:Store}){
- return <><div className="optimization-modes"><span className="terminal-chip">Markowitz avanzado · motor principal</span></div><AdvancedOptimization portfolio={portfolio} store={store}/><details className="terminal-panel chart-panel"><summary>Malla clásica (5 %) · herramienta adicional</summary><Optimization portfolio={portfolio} store={store}/></details></>;
+ return <><PortfolioLab key={portfolio.id} portfolio={portfolio} mode="optimization"/><div className="optimization-modes"><span className="terminal-chip">Markowitz avanzado · motor principal</span></div><AdvancedOptimization portfolio={portfolio} store={store}/><details className="terminal-panel chart-panel"><summary>Malla clásica (5 %) · herramienta adicional</summary><Optimization portfolio={portfolio} store={store}/></details></>;
 }
 
 function Optimization({portfolio:c,store}:{portfolio:Portfolio;store:Store}){
